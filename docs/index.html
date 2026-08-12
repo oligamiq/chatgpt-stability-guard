@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Privacy Policy — Stability Guard for ChatGPT</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.7; }
+    body { max-width: 860px; margin: 0 auto; padding: 40px 24px 72px; }
+    h1 { line-height: 1.25; }
+    h2 { margin-top: 2em; border-bottom: 1px solid #8885; padding-bottom: .25em; }
+    h3 { margin-top: 1.4em; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .note { padding: 12px 16px; border: 1px solid #8885; border-radius: 10px; }
+    .lang { margin-top: 3.5em; padding-top: 2em; border-top: 2px solid #8887; }
+    a { color: #0b67c2; }
+    @media (prefers-color-scheme: dark) { a { color: #7ab8ff; } }
+  </style>
+</head>
+<body>
+  <h1>Stability Guard for ChatGPT プライバシーポリシー</h1>
+  <p><strong>最終更新日:</strong> 2026年8月13日</p>
+  <p class="note">Stability Guard for ChatGPT は独立した非公式のブラウザ拡張機能であり、OpenAIによる作成、承認、提携製品ではありません。</p>
+
+  <h2>1. 本拡張機能が処理するデータ</h2>
+  <h3>ChatGPT上のWebサイトコンテンツおよび個人的コミュニケーション</h3>
+  <p>本拡張機能は、<code>https://chatgpt.com/*</code> 上に表示されたDOMをブラウザ内で読み取り、会話ターン、Thinking / reasoning、tool trace、埋め込みツールUI、プレースホルダー、code / log、エラー表示などを識別します。</p>
+  <p>このDOMには、ChatGPTとの会話などの個人的コミュニケーションや、ユーザーが入力したWebサイトコンテンツが含まれる場合があります。これらは、描画負荷を減らし、ユーザーが選択したChatGPT UI要素を非表示または遅延描画するという本拡張機能の単一目的のために、端末上で一時的に処理されます。</p>
+  <p>本拡張機能は、会話内容やWebサイトコンテンツを独自の永続ストレージへ保存せず、開発者または第三者のサーバーへ送信しません。</p>
+
+  <h3>ローカル設定</h3>
+  <p>本拡張機能は <code>chrome.storage.local</code> を使用して、各機能の有効・無効、表示する直近の会話数、プライバシー同意バージョン、同意日時などの設定をブラウザ内に保存します。これらの設定は開発者運営サーバーへ送信されません。</p>
+
+  <h2>2. 外部通信とリモートコード</h2>
+  <p>本拡張機能には、解析、広告、テレメトリ、リモート設定、アカウントシステム、開発者運営バックエンドはありません。本拡張機能自身からユーザーデータを外部へ送信するネットワークリクエストを開始しません。</p>
+  <p>実行するJavaScriptは拡張機能パッケージ内に同梱されており、外部サーバーやCDNからリモートコードを取得して実行しません。</p>
+
+  <h2>3. データの販売・共有・その他の利用</h2>
+  <p>本拡張機能はユーザーデータを販売、共有、第三者へ転送しません。また、広告、信用評価、融資、または本拡張機能の単一目的と関係のない用途にユーザーデータを使用しません。</p>
+
+  <h2>4. Chrome Web Store Limited Use</h2>
+  <p>本拡張機能によるユーザーデータの利用は、Chrome Web Store User Data Policy（Limited Use要件を含む）に準拠します。</p>
+
+  <h2>5. 保持、同意、削除</h2>
+  <p>ChatGPT上のWebサイトコンテンツや会話内容は、表示中のページ内で一時的に処理されるだけで、本拡張機能によって保持されません。ローカル設定は、ユーザーが変更・消去するか、本拡張機能を削除するまでブラウザプロファイル内に保持されます。</p>
+  <p>ユーザーは拡張機能のポップアップからローカルなページ処理への同意を取り消すことができます。ChatGPTタブを検出できる場合は、撤回時にそのタブを再読み込みし、撤回済み状態でDOM処理を停止します。</p>
+
+  <h2>6. 権限</h2>
+  <p><code>storage</code> 権限はローカル設定を保存するために使用します。ホストアクセスおよびcontent scriptは <code>https://chatgpt.com/*</code> のみに限定し、上記の表示最適化を行うために使用します。</p>
+
+  <h2>7. 互換性</h2>
+  <p>本拡張機能は現在のChatGPT Web UIに合わせて実装されています。ChatGPT側のDOMまたはUI更新により、拡張機能が更新されるまで一時的に検出や非表示が機能しなくなる場合があります。</p>
+
+  <h2>8. お問い合わせ</h2>
+  <p>プライバシーに関する質問は、Chrome Web Store掲載ページに表示される開発者連絡先をご利用ください。</p>
+
+  <section class="lang" lang="en">
+    <h1>Privacy Policy — Stability Guard for ChatGPT</h1>
+    <p><strong>Last updated:</strong> August 13, 2026</p>
+    <p class="note">Stability Guard for ChatGPT is an independent, unofficial browser extension and is not created by, endorsed by, or affiliated with OpenAI.</p>
+
+    <h2>1. Data handled by the extension</h2>
+    <h3>Website content and personal communications on ChatGPT</h3>
+    <p>The extension locally reads the rendered DOM on <code>https://chatgpt.com/*</code> to identify conversation turns, Thinking / reasoning displays, tool traces, embedded tool UI, placeholders, code / log blocks, and error displays.</p>
+    <p>This DOM may contain personal communications such as conversations with ChatGPT and website content entered by the user. This content is processed transiently on the user's device solely for the extension's single purpose: reducing rendering churn and optionally hiding or deferring selected ChatGPT UI elements.</p>
+    <p>The extension does not persist conversation content or website content in its own storage and does not transmit that content to the developer or to third-party servers.</p>
+
+    <h3>Local settings</h3>
+    <p>The extension uses <code>chrome.storage.local</code> to store settings such as enabled features, the number of recent conversation exchanges to display, the privacy-consent version, and the consent timestamp. These settings are not transmitted to a developer-operated server.</p>
+
+    <h2>2. Network activity and remote code</h2>
+    <p>The extension has no analytics, advertising, telemetry, remote configuration, account system, or developer-operated backend. It does not initiate network requests that transmit user data externally.</p>
+    <p>All JavaScript executed by the extension is packaged with the extension. It does not download or execute remote code from external servers or CDNs.</p>
+
+    <h2>3. Sale, sharing, and other use of data</h2>
+    <p>The extension does not sell, share, or transfer user data to third parties. User data is not used for advertising, creditworthiness, lending, or purposes unrelated to the extension's single purpose.</p>
+
+    <h2>4. Chrome Web Store Limited Use</h2>
+    <p>The extension’s use of user data complies with the Chrome Web Store User Data Policy, including the Limited Use requirements.</p>
+
+    <h2>5. Retention, consent, and deletion</h2>
+    <p>Website content and conversations on ChatGPT are processed transiently in the displayed page and are not retained by the extension. Local settings remain in the browser profile until changed, cleared, or the extension is removed.</p>
+    <p>Users can revoke consent for local page processing from the extension popup. When a ChatGPT tab is detected, the extension reloads that tab so DOM processing stops under the revoked consent state.</p>
+
+    <h2>6. Permissions</h2>
+    <p>The <code>storage</code> permission is used for local settings. Host access and content scripts are limited to <code>https://chatgpt.com/*</code> and are used only to provide the display optimizations described above.</p>
+
+    <h2>7. Compatibility</h2>
+    <p>The extension is implemented against the current ChatGPT web UI. Changes to ChatGPT's DOM or UI can temporarily break detection or hiding until the extension is updated.</p>
+
+    <h2>8. Contact</h2>
+    <p>For privacy questions, use the developer contact method shown on the extension's Chrome Web Store listing.</p>
+  </section>
+</body>
+</html>
