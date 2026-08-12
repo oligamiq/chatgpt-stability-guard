@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.7 — 2026-08-13
+
+- Fixed recent-N on long ChatGPT share conversations that keep sparse old turns mounted while virtualizing the middle of the thread.
+- Prevented sparse numeric DOM gaps from being mistaken for branch deletion or tail divergence, which could make recent-N fall back to showing the full conversation.
+- Kept searching when the first user turn in a share-page suffix may be only a continuation, so N=2 correctly includes the preceding request instead of starting at `Continue`.
+- Added safe backward boundary expansion when older virtualized context appears after recent-N is already ready.
+- Made semantic turn ordering authoritative over small temporary virtualizer coordinate drift when deciding whether a mounted boundary turn is old.
+- Detects attribute-only conversation-turn shell updates so newly appended exchanges advance the recent-N boundary without reloading.
+- Preserved branch/edit fail-open safety for sparse numeric turns by confirming `data-message-id` replacement before disabling recent-N.
+- Added headless-Chrome regression coverage for sparse share/private DOMs, late-prepended context, coordinate drift, no-reload boundary advancement, message-identity branch fail-open, and mixed numeric/opaque windows.
+
 ## 1.0.6 — 2026-08-13
 
 - Replaced the extension and Chrome Web Store icon with a simpler chat-bubble and shield design optimized for small sizes.

@@ -18,6 +18,8 @@
     roleValidation: new Map(),
     roleLocks: new Map(),
     numeric: new Map(),
+    messageIds: new Map(),
+    identityEvidence: new Map(),
     keyTops: new Map(),
     missingEvidence: new Map(),
     boundaryKey: '',
@@ -150,6 +152,13 @@
     return nestedMessageId ? `m:${nestedMessageId}` : '';
   }
 
+  function turnMessageId(turn) {
+    if (!(turn instanceof Element)) return '';
+    const own = turn.getAttribute('data-message-id');
+    if (own) return own;
+    return turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') || '';
+  }
+
   function numericTurnIndex(turn) {
     const value = turn?.getAttribute?.('data-testid') || '';
     const match = /^conversation-turn-(\d+)$/.exec(value);
@@ -161,7 +170,8 @@
       turn,
       key: turnKey(turn),
       role: turnRole(turn),
-      index: numericTurnIndex(turn)
+      index: numericTurnIndex(turn),
+      messageId: turnMessageId(turn)
     })).filter((item) => item.key);
   }
 
@@ -179,6 +189,8 @@
       state.roleValidation.delete(key);
       state.roleLocks.delete(key);
       state.numeric.delete(key);
+      state.messageIds.delete(key);
+      state.identityEvidence.delete(key);
       state.keyTops.delete(key);
       state.missingEvidence.delete(key);
     }
@@ -218,21 +230,40 @@
     return confirmed;
   }
 
+  function messageIdentityDiverged(items) {
+    if (!state.ready) return false;
+    const now = performance.now();
+    let pending = false;
+    for (const item of items) {
+      if (!item.key || !item.messageId) continue;
+      const known = state.messageIds.get(item.key);
+      if (!known || known === item.messageId) {
+        state.identityEvidence.delete(item.key);
+        continue;
+      }
+      const previous = state.identityEvidence.get(item.key);
+      const evidence = previous?.messageId === item.messageId
+        ? { ...previous, count: previous.count + 1, lastAt: now }
+        : { messageId: item.messageId, count: 1, firstAt: now, lastAt: now };
+      state.identityEvidence.set(item.key, evidence);
+      if (evidence.count >= 2 && evidence.lastAt - evidence.firstAt >= 50) return true;
+      pending = true;
+    }
+    if (pending) scheduleStructureRefresh();
+    return false;
+  }
+
   function reconcileMountedWindow(items) {
     if (!state.sequence.length || items.length < 2) return;
     const keys = items.map((item) => item.key);
     const numericItems = items.filter((item) => Number.isInteger(item.index));
     if (numericItems.length === items.length) {
-      const min = Math.min(...numericItems.map((item) => item.index));
-      const max = Math.max(...numericItems.map((item) => item.index));
-      const mountedIndexes = new Set(numericItems.map((item) => item.index));
-      const stale = [];
-      for (const key of state.sequence) {
-        const index = state.numeric.get(key);
-        if (Number.isInteger(index) && index >= min && index <= max && !mountedIndexes.has(index)) stale.push(key);
-      }
+      // ChatGPT can keep sparse, old numeric turns mounted outside the active
+      // virtualized window (notably image turns on /share/). A numeric gap in
+      // querySelectorAll() therefore does not prove that remembered turns inside
+      // that [min, max] span were deleted by a branch edit. Numeric keys can be
+      // merged back into semantic order when they reappear, so do not prune them.
       for (const item of numericItems) state.missingEvidence.delete(item.key);
-      forgetSequenceKeys(confirmedMissingKeys(stale));
       return;
     }
 
@@ -241,7 +272,7 @@
     // that bounded segment so orphaned edit/branch keys cannot live forever.
     const anchored = keys
       .map((key, domIndex) => ({ key, domIndex, seqIndex: state.sequence.indexOf(key) }))
-      .filter((item) => item.seqIndex >= 0);
+      .filter((item) => item.seqIndex >= 0 && !Number.isInteger(state.numeric.get(item.key)));
     if (anchored.length < 2) return;
     const first = anchored[0];
     const last = anchored[anchored.length - 1];
@@ -271,6 +302,7 @@
       if (item.role) observeRole(item.key, item.role);
       refreshAssistantContentEvidence(item);
       if (Number.isInteger(item.index)) state.numeric.set(item.key, item.index);
+      if (item.messageId && !state.messageIds.has(item.key)) state.messageIds.set(item.key, item.messageId);
       if (state.scrollHost) {
         const top = topInScrollContent(item.turn);
         if (Number.isFinite(top)) state.keyTops.set(item.key, top);
@@ -295,23 +327,27 @@
     if (overlaps.length) {
       const offset = overlaps[0].knownIndex - overlaps[0].currentIndex;
       if (overlaps.every((item) => item.knownIndex - item.currentIndex === offset)) {
-        const combined = [...state.sequence];
+        let conflict = false;
         for (let i = 0; i < keys.length; i += 1) {
           const absolute = offset + i;
-          if (absolute < 0) combined.unshift(keys[i]);
-          else if (absolute >= combined.length && !combined.includes(keys[i])) combined.push(keys[i]);
+          if (absolute >= 0 && absolute < state.sequence.length && state.sequence[absolute] !== keys[i]) {
+            conflict = true;
+            break;
+          }
         }
-        // Rebuild from the aligned window to correctly handle multiple prepends.
-        if (offset < 0) {
-          const prefix = keys.slice(0, -offset);
-          state.sequence = [...prefix, ...state.sequence.filter((key) => !prefix.includes(key))];
-        } else {
-          const suffixStart = Math.max(0, state.sequence.length - offset);
-          const suffix = keys.slice(suffixStart).filter((key) => !positions.has(key));
-          state.sequence = [...state.sequence, ...suffix];
+        if (!conflict) {
+          // Rebuild from the aligned window to correctly handle multiple prepends.
+          if (offset < 0) {
+            const prefix = keys.slice(0, -offset);
+            state.sequence = [...prefix, ...state.sequence.filter((key) => !prefix.includes(key))];
+          } else {
+            const suffixStart = Math.max(0, state.sequence.length - offset);
+            const suffix = keys.slice(suffixStart).filter((key) => !positions.has(key));
+            state.sequence = [...state.sequence, ...suffix];
+          }
+          state.lastMergeScrollTop = currentTop;
+          return;
         }
-        state.lastMergeScrollTop = currentTop;
-        return;
       }
     }
 
@@ -397,11 +433,12 @@
     const keys = items.map((item) => item.key);
     const positions = keys.map((key) => state.sequence.indexOf(key));
 
-    // Strong branch signal: a new/unknown turn follows a known anchor that is
-    // not the semantic tail. A normal new message follows the current tail, so
-    // it does not match this condition even at the physical bottom.
+    // Strong branch signal: a new/unknown opaque turn follows a known anchor that
+    // is not the semantic tail. Numeric turn indexes are excluded individually:
+    // ChatGPT can mount a numeric historic turn inside a mixed numeric/opaque
+    // window, and mergeWindow() can place that turn safely by numeric order.
     for (let i = 0; i < keys.length; i += 1) {
-      if (positions[i] >= 0) continue;
+      if (positions[i] >= 0 || Number.isInteger(items[i].index)) continue;
       for (let j = i - 1; j >= 0; j -= 1) {
         if (positions[j] < 0) continue;
         if (positions[j] < state.sequence.length - 1) return true;
@@ -430,8 +467,10 @@
     const keys = items.map((item) => item.key);
     const positions = keys.map((key) => state.sequence.indexOf(key));
     const known = positions.every((index) => index >= 0);
-    const contiguous = known && positions.every((index, i) => i === 0 || index === positions[i - 1] + 1);
-    const isSuffix = contiguous && positions[positions.length - 1] === state.sequence.length - 1;
+    // Sparse mounted outliers are harmless when DOM order still follows the
+    // remembered sequence and the newest mounted key is the semantic tail.
+    const ordered = known && positions.every((index, i) => i === 0 || index > positions[i - 1]);
+    const isSuffix = ordered && positions[positions.length - 1] === state.sequence.length - 1;
     if (isSuffix) {
       state.bottomTailEvidence = null;
       return false;
@@ -461,8 +500,7 @@
     return keys.slice(start);
   }
 
-  function exchangeStartKeys() {
-    if (!isShareRoute()) return userKeys();
+  function shareExchangeStarts() {
     const starts = [];
     let current = '';
     let assistantResponded = false;
@@ -472,13 +510,17 @@
       if (!current) {
         if (role === 'user') {
           current = key;
-          starts.push(key);
+          // A user at the start of the trusted suffix may actually be a
+          // continuation of an exchange whose earlier user/empty-assistant turns
+          // are currently virtualized out. Keep searching before trusting it as
+          // the recent-N boundary.
+          starts.push({ key, confirmed: false });
         } else if (meaningfulAssistant) {
           // Share pages can omit the user-side DOM section for an older exchange
-          // while retaining its final assistant section. Keep that visible response
-          // as a synthetic exchange boundary rather than losing one requested turn.
+          // while retaining its final assistant section. That rendered response is
+          // safe to use as a synthetic exchange boundary.
           current = key;
-          starts.push(key);
+          starts.push({ key, confirmed: true });
           assistantResponded = true;
         }
         continue;
@@ -486,7 +528,7 @@
       if (role === 'user') {
         if (assistantResponded) {
           current = key;
-          starts.push(key);
+          starts.push({ key, confirmed: true });
           assistantResponded = false;
         }
       } else if (meaningfulAssistant) {
@@ -494,6 +536,11 @@
       }
     }
     return starts;
+  }
+
+  function exchangeStartKeys() {
+    if (!isShareRoute()) return userKeys();
+    return shareExchangeStarts().map((entry) => entry.key);
   }
 
   function computeBoundary() {
@@ -505,8 +552,14 @@
   }
 
   function boundaryDiscoveryComplete() {
-    const starts = exchangeStartKeys();
-    return starts.length >= state.n && Boolean(computeBoundary());
+    if (!isShareRoute()) {
+      const starts = exchangeStartKeys();
+      return starts.length >= state.n && Boolean(computeBoundary());
+    }
+    const starts = shareExchangeStarts();
+    if (starts.length < state.n) return false;
+    const boundary = starts[Math.max(0, starts.length - state.n)];
+    return Boolean(boundary?.key && boundary.confirmed);
   }
 
   function keyPosition(key) {
@@ -528,9 +581,17 @@
   function markTurnElement(turn) {
     if (!(turn instanceof Element)) return false;
     const key = turnKey(turn);
-    const top = state.ready ? topInScrollContent(turn) : null;
-    const beforeBoundary = Number.isFinite(top) && top < state.minScrollTop - 1;
-    const old = isOldKey(key) || beforeBoundary;
+    const boundaryPosition = keyPosition(state.boundaryKey);
+    const position = keyPosition(key);
+    const boundaryNumeric = state.numeric.get(state.boundaryKey);
+    const numeric = state.numeric.get(key);
+    const semanticKnown = boundaryPosition >= 0 && position >= 0;
+    const numericKnown = Number.isInteger(boundaryNumeric) && Number.isInteger(numeric);
+    // Semantic ordering is authoritative. An unknown mounted/reused turn is
+    // not proven old, so keep it visible until refreshStructure() classifies it.
+    let old = false;
+    if (semanticKnown) old = position < boundaryPosition;
+    else if (numericKnown) old = numeric < boundaryNumeric;
     turn.classList.toggle('csg-hidden-old-turn', old);
     return old;
   }
@@ -974,6 +1035,24 @@
     return Number.isInteger(currentNumeric) && Number.isInteger(candidateNumeric) && candidateNumeric > currentNumeric;
   }
 
+  function boundaryMovesBackward(candidate) {
+    if (!candidate || !state.boundaryKey || candidate === state.boundaryKey) return false;
+    const currentPosition = keyPosition(state.boundaryKey);
+    const candidatePosition = keyPosition(candidate);
+    if (currentPosition >= 0 && candidatePosition >= 0) return candidatePosition < currentPosition;
+    const currentNumeric = state.numeric.get(state.boundaryKey);
+    const candidateNumeric = state.numeric.get(candidate);
+    return Number.isInteger(currentNumeric) && Number.isInteger(candidateNumeric) && candidateNumeric < currentNumeric;
+  }
+
+  function confirmedShareBoundary() {
+    if (!isShareRoute()) return '';
+    const starts = shareExchangeStarts();
+    if (starts.length < state.n) return '';
+    const boundary = starts[Math.max(0, starts.length - state.n)];
+    return boundary?.confirmed ? boundary.key : '';
+  }
+
   function isStableUserKey(key) {
     if (state.roleLocks.get(key) === 'user') return true;
     const evidence = state.roleEvidence.get(key);
@@ -1049,6 +1128,18 @@
     return false;
   }
 
+
+  function tryExpandShareBoundary(candidate) {
+    if (!isShareRoute() || !boundaryMovesBackward(candidate)) return false;
+    // A backward move can only reveal content, but require the share parser to
+    // prove this older key is a real exchange start before changing the window.
+    if (confirmedShareBoundary() !== candidate) return false;
+    const mounted = findMountedByKey(candidate);
+    if (!mounted) return false;
+    if (!validateBoundaryKey(candidate)) return false;
+    return adoptBoundary(candidate, true);
+  }
+
   function refreshStructure() {
     if (!state.active) return;
     if (location.pathname !== state.route) {
@@ -1060,6 +1151,10 @@
 
     if (state.suspended) return;
     const mountedWindow = currentWindow();
+    if (state.ready && messageIdentityDiverged(mountedWindow)) {
+      failOpenRecent();
+      return;
+    }
     if (state.ready && midSequenceBranchDiverged(mountedWindow)) {
       failOpenRecent();
       return;
@@ -1076,10 +1171,14 @@
 
     if (state.pendingBoundaryKey) tryAdvanceBoundary(state.pendingBoundaryKey);
     const candidate = computeBoundary();
-    if (candidate && candidate !== state.boundaryKey) tryAdvanceBoundary(candidate);
+    if (candidate && candidate !== state.boundaryKey) {
+      if (!tryAdvanceBoundary(candidate)) tryExpandShareBoundary(candidate);
+    }
+    markMountedTurns();
+    // Hiding old turns can change virtualizer geometry. Re-read the mounted
+    // semantic boundary after that DOM change before clamping the scroll range.
     syncBoundaryCoordinate();
     updateMinimum();
-    markMountedTurns();
   }
 
   function scheduleStructureRefresh() {
@@ -1104,6 +1203,18 @@
       let structureChanged = false;
       let recentContentChanged = false;
       for (const mutation of mutations) {
+        if (mutation.type === 'attributes') {
+          const target = mutation.target instanceof Element ? mutation.target : null;
+          const wasTurnTestId = mutation.attributeName === 'data-testid' &&
+            String(mutation.oldValue || '').startsWith('conversation-turn-');
+          if (wasTurnTestId || target?.matches(TURN_SELECTOR) || target?.closest(TURN_SELECTOR)) {
+            structureChanged = true;
+            if (wasTurnTestId && target && !target.matches(TURN_SELECTOR)) {
+              target.classList.remove('csg-hidden-old-turn');
+            }
+          }
+          continue;
+        }
         if (mutation.type !== 'childList') continue;
         const targetTurn = mutation.target instanceof Element ? mutation.target.closest(TURN_SELECTOR) : null;
         if (targetTurn) {
@@ -1120,9 +1231,10 @@
           if (node.matches(TURN_SELECTOR)) {
             if (state.ready) markTurnElement(node);
             structureChanged = true;
-          } else if (!targetTurn) {
-            // A virtualizer may insert a wrapper containing turns. Avoid recursively
-            // searching it here; one coalesced document-level query runs in refreshStructure().
+          } else if (!targetTurn && node.querySelector?.(TURN_SELECTOR)) {
+            // React may insert a wrapper containing one or more turns. Ignore
+            // unrelated page/UI mutations, but trigger one coalesced structure
+            // refresh when the inserted wrapper actually contains a turn.
             structureChanged = true;
           }
         }
@@ -1130,7 +1242,13 @@
       if (structureChanged) scheduleStructureRefresh();
       if (recentContentChanged) scheduleContentRefresh();
     });
-    state.observer.observe(document.documentElement, { childList: true, subtree: true });
+    state.observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-message-id', 'data-turn-id'],
+      attributeOldValue: true
+    });
   }
 
   function attachScrollHost() {
@@ -1436,6 +1554,8 @@
     state.roleValidation.clear();
     state.roleLocks.clear();
     state.numeric.clear();
+    state.messageIds.clear();
+    state.identityEvidence.clear();
     state.keyTops.clear();
     state.missingEvidence.clear();
     state.boundaryKey = '';
@@ -1470,7 +1590,6 @@
       if (!state.active) return;
       if (location.pathname !== state.route) scheduleStructureRefresh();
       else if (state.ready) {
-        syncBoundaryCoordinate();
         updateMinimum();
       }
     }, 750);
