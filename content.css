@@ -1,0 +1,114 @@
+html.csg-reduce-motion {
+  scroll-behavior: auto !important;
+}
+
+html.csg-reduce-motion :where(
+  [class*="animate-"],
+  [class*="transition-"],
+  [role="progressbar"],
+  [aria-busy="true"]
+) {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+html.csg-hide-thinking .csg-thinking,
+html.csg-hide-tools .csg-tool,
+html.csg-hide-tool-summary .csg-tool-ui,
+html.csg-hide-tool-embeds .csg-tool-embed,
+html.csg-hide-old-app-errors .csg-old-app-load-error {
+  display: none !important;
+}
+
+html.csg-show-recent-only .csg-hidden-old-turn {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+html.csg-show-recent-only,
+html.csg-show-recent-only body,
+html.csg-show-recent-only .csg-recent-scrollhost {
+  scrollbar-width: none !important;
+}
+
+html.csg-show-recent-only::-webkit-scrollbar,
+html.csg-show-recent-only body::-webkit-scrollbar,
+html.csg-show-recent-only .csg-recent-scrollhost::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+#csg-recent-scrollbar {
+  position: fixed;
+  width: 8px;
+  z-index: 2147483646;
+  border-radius: 999px;
+  background: color-mix(in srgb, CanvasText 8%, transparent);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#csg-recent-scrollbar[hidden] { display: none !important; }
+
+#csg-recent-scrollbar-thumb {
+  width: 100%;
+  min-height: 28px;
+  border-radius: inherit;
+  background: color-mix(in srgb, CanvasText 42%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+
+#csg-recent-scrollbar-thumb:active { cursor: grabbing; }
+#csg-recent-scrollbar-thumb[hidden] { display: none !important; }
+
+html.csg-lazy-heavy pre,
+html.csg-lazy-heavy .csg-heavy {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+html.csg-freeze-old .csg-frozen {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
+}
+
+#csg-status {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2147483647;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, Canvas 88%, transparent);
+  color: CanvasText;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, CanvasText 10%, transparent);
+  font: 11px/1.25 system-ui, sans-serif;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+#csg-status[data-active="false"] {
+  display: none;
+}
+
+html.csg-dim-traces .csg-thinking,
+html.csg-dim-traces .csg-tool {
+  opacity: 0.52 !important;
+  filter: saturate(0.5) !important;
+}
+
+html.csg-compact-traces .csg-thinking,
+html.csg-compact-traces .csg-tool {
+  max-block-size: 18rem !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+
+html.csg-compact-traces .csg-trace-body {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}

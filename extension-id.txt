@@ -1,0 +1,4 @@
+Development unpacked extension ID (from the source manifest key):
+iihkniinobkipmkjjadcaimgglejpkge
+
+The Chrome Web Store item ID may differ after the first upload. If you want local unpacked builds to use the Store item ID, replace the source manifest key with the public key shown for that Store item, then recalculate/update this file.

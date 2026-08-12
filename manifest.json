@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Stability Guard for ChatGPT",
+  "version": "1.0.5",
+  "description": "Reduces rendering churn in long ChatGPT chats. Built for the current ChatGPT web UI; site updates may require an extension update.",
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_title": "Stability Guard for ChatGPT",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "prehide.js"
+      ],
+      "css": [
+        "prehide.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content.js",
+        "recent-window.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvv4Fl58eZLkdJSz8LPZiauYm2rI7fA5d0Hw/Ykd2MilzCBs96QXqrZNIsYW095OwtYtVituKTLpaYoAwBWCjyvYaUbwK3BY0l/jvekresnex3VrV+y7DpYggUfVEX7PUoFNETJ0zz/MophjwvQyy0o1YvgELPPvgVTTIg5PVA2fwjwe3DJz1WNAhcu3x0jWONmzP6Z6mHE3kcFTC8jRZBN3ZScRoZpTx0auQiAcx4zj9F9UbSiNflNzYfK8ponivf+ieDcs3UrZuKwpQN/FvBOIq4V4AKJdrs6rXOAZ6QYrOKTt6GX5zdbDoqzYXvDPhqKl1E3QEtlhmZzu/zZ5byQIDAQAB",
+  "incognito": "not_allowed",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy — Stability Guard for ChatGPT</title><link rel="stylesheet" href="privacy.css"></head>
+<body>
+<h1>プライバシーポリシー</h1>
+<p><small>Stability Guard for ChatGPT · 最終更新 2026-08-12</small></p>
+<p class="note">本拡張は独立した非公式拡張であり、OpenAIによる作成・承認・提携製品ではない。</p>
+<h2>処理するデータ</h2>
+<h3>chatgpt.com 上のWebサイト内容</h3>
+<p>Thinking、ツールtrace、埋め込みツールUI、プレースホルダ、code/log等を識別するため、<code>chatgpt.com</code> の描画済みDOMを端末内で読み取る。会話の近くや内部に存在するDOMを扱うため、処理対象にはユーザー生成コンテンツや個人的な会話内容が含まれる可能性がある。</p>
+<p>この内容は、描画負荷を減らし、ユーザーが選択したChatGPT UI要素を非表示・遅延描画する目的に限ってブラウザ内で処理する。会話内容を拡張機能の永続ストレージへ保存せず、開発者または第三者へ送信しない。</p>
+<h3>ローカル設定</h3>
+<p>拡張設定、同意バージョン、同意時刻のみを <code>chrome.storage.local</code> に保存する。開発者運営サーバーへ送信しない。</p>
+<h2>外部通信</h2>
+<p>解析、広告、テレメトリ、リモート設定、アカウント機能、開発者運営バックエンドを持たず、拡張自身から外部ネットワークリクエストを開始しない。</p>
+<h2>共有・販売</h2><p>ユーザーデータを販売・共有・第三者移転しない。</p>
+<h2>保持・同意・削除</h2><p>Webサイト内容はページ内で一時的に処理するだけで、拡張機能は保持しない。ローカル設定は変更・消去・アンインストールまでブラウザプロファイル内に残る。データ処理への同意は拡張ポップアップから取り消せる。ChatGPTタブを検出できる場合は、撤回時にそのタブを再読み込みし、撤回済み状態でDOM処理を停止する。</p>
+<h2>権限</h2><p><code>storage</code> はローカル設定保存に使用する。content scriptは <code>https://chatgpt.com/*</code> のみに限定する。</p>
+<h2>互換性</h2><p>現在のChatGPT Web UIに合わせた実装である。ChatGPT側のDOM/UI更新により、拡張の更新まで一時的に検出や非表示が機能しなくなる場合がある。</p>
+<h2>連絡先</h2><p>Chrome Web Store掲載ページに表示される開発者連絡先を利用する。</p>
+</body></html>

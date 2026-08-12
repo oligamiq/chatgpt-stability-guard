@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stability Guard for ChatGPT</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="title-wrap">
+      <strong>Stability Guard for ChatGPT</strong>
+      <small class="unofficial">非公式拡張 · OpenAIとは無関係</small>
+      <small id="pageState">対象タブを確認中</small>
+    </div>
+    <label class="switch master" title="拡張機能全体"><input id="enabled" type="checkbox"><span></span></label>
+  </header>
+
+  <section id="consentPanel" class="consent" hidden>
+    <h1>データの扱いについて</h1>
+    <p>この拡張は、<b>chatgpt.com 上の表示済みページ内容</b>（会話本文を含む可能性があるDOM）を端末内で読み取り、Thinking・ツールUI・コード等を識別して描画を軽量化する。</p>
+    <ul>
+      <li>会話内容を外部へ送信・保存しない</li>
+      <li>解析・広告・テレメトリ用の外部通信を行わない</li>
+      <li>拡張設定と同意状態のみを端末内のChrome Storageへ保存する</li>
+    </ul>
+    <label class="consent-check"><input id="consentCheck" type="checkbox"> 上記のローカル処理に同意する</label>
+    <button id="acceptConsent" class="primary" type="button" disabled>同意して有効化</button>
+    <button id="declineConsent" type="button">同意せず閉じる</button>
+    <a class="policy-link" href="privacy.html" target="_blank" rel="noreferrer">プライバシーポリシーを読む</a>
+  </section>
+
+  <div id="compatNotice" class="compat-notice">
+    <b>互換性:</b> 現在のChatGPT Web UI向け。ChatGPT側のDOM/UI更新により、一時的に検出・非表示が動作しなくなる場合がある。
+  </div>
+
+  <div id="pendingNotice" class="notice" hidden>
+    <span>設定は保存済み。再読み込み後に反映される。</span>
+    <button id="reloadTab" type="button">現在のタブを再読み込み</button>
+  </div>
+
+  <main id="settingsMain">
+    <section>
+      <h2>非表示</h2>
+      <label class="setting"><span><b>Thinking / reasoning</b><small>推論表示を隠す</small></span><input id="hideThinking" type="checkbox"></label>
+      <label class="setting"><span><b>MCP / tool 本体</b><small>tool trace本体を隠す</small></span><input id="hideTools" type="checkbox"></label>
+      <label class="setting"><span><b>ツール概要</b><small>Called tool / ツール呼び出し行</small></span><input id="hideToolSummary" type="checkbox"></label>
+      <label class="setting"><span><b>埋め込みツールUI</b><small>configカードなどのrich UI</small></span><input id="hideToolEmbeds" type="checkbox"></label>
+      <label class="setting"><span><b>読み込み中プレースホルダ</b><small>rich UI生成前の灰色スケルトン</small></span><input id="prehideToolPlaceholders" type="checkbox"></label>
+      <label class="setting"><span><b>古いアプリ読み込みエラー</b><small>Failed to fetch template。最新turnのものは残す</small></span><input id="hideOldAppLoadErrors" type="checkbox"></label>
+    </section>
+
+    <section>
+      <h2>描画の軽量化</h2>
+      <label class="setting"><span><b>traceを薄くする</b><small>Thinking / toolを低コントラスト化</small></span><input id="dimTraces" type="checkbox"></label>
+      <label class="setting"><span><b>traceの高さを制限</b><small>長いtraceをスクロール領域にする</small></span><input id="compactTraces" type="checkbox"></label>
+      <label class="setting"><span><b>アニメーション抑制</b><small>transition / progress描画を削減</small></span><input id="reduceMotion" type="checkbox"></label>
+      <label class="setting"><span><b>code / log遅延描画</b><small>画面外preの描画を遅延</small></span><input id="lazyHeavyBlocks" type="checkbox"></label>
+    </section>
+
+    <section class="danger">
+      <h2>長大スレッド</h2>
+      <label class="setting"><span><b>直近N回の対話だけ表示</b><small>古い対話を非表示・既定OFF</small></span><input id="showRecentOnly" type="checkbox"></label>
+      <label class="row">表示する対話数 N <input id="recentExchanges" type="number" min="1" max="100" step="1"></label>
+      <p class="hint">1対話 = ユーザー発言から次のユーザー発言直前まで。DOM自体は削除せず、直近N範囲専用のスクロールバーを使う。</p>
+      <label class="setting"><span><b>古いターンを遅延描画</b><small>Aggressive・既定OFF・直近N表示中は自動停止</small></span><input id="freezeOldTurns" type="checkbox"></label>
+      <label class="row">完全描画を残すターン数 <input id="keepTurns" type="number" min="2" max="100" step="1"></label>
+      <label class="setting"><span><b>Guard状態表示</b><small>ページ右下の小さなステータス</small></span><input id="showStatus" type="checkbox"></label>
+    </section>
+
+    <section class="stats">
+      <div class="section-title"><h2>現在のページ</h2><span id="statsState">検出待ち</span></div>
+      <div class="total"><span>非表示中</span><strong id="hiddenTotal">—</strong><small>件</small></div>
+      <div class="stat-grid">
+        <span>Thinking</span><b id="countThinking">—</b>
+        <span>MCP / tool</span><b id="countTools">—</b>
+        <span>ツール概要</span><b id="countSummary">—</b>
+        <span>埋め込みUI</span><b id="countEmbeds">—</b>
+        <span>プレースホルダ</span><b id="countPrehide">—</b>
+        <span>古いアプリ読込エラー</span><b id="countOldAppErrors">—</b>
+        <span>検出済みの古い対話</span><b id="countOldExchanges">—</b>
+        <span>現在DOMで非表示の古いターン</span><b id="countOldTurns">—</b>
+        <span>遅延描画ターン</span><b id="countFrozen">—</b>
+        <span>遅延描画code/log</span><b id="countHeavy">—</b>
+      </div>
+    </section>
+
+    <div class="buttons">
+      <button id="safePreset" type="button">既定に戻す</button>
+      <button id="maxPreset" type="button">最大軽量化</button>
+    </div>
+    <footer><a href="privacy.html" target="_blank" rel="noreferrer">Privacy</a><button id="revokeConsent" class="link-button" type="button">データ処理の同意を取り消す</button><span>Compatibility profile: ChatGPT Web UI · 2026-08</span></footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+:root { color-scheme: light dark; }
+body { max-width:780px; margin:40px auto; padding:0 24px 60px; background:Canvas; color:CanvasText; font:15px/1.65 system-ui,sans-serif; }
+h1 { font-size:26px; line-height:1.2; }
+h2 { margin-top:30px; font-size:17px; }
+h3 { font-size:15px; }
+code { padding:2px 5px; border-radius:5px; background:color-mix(in srgb,CanvasText 7%,Canvas); }
+.note { padding:12px 14px; border-left:3px solid Highlight; background:color-mix(in srgb,Highlight 6%,Canvas); }
+small { opacity:.65; }
