@@ -5,13 +5,13 @@ This repository is prepared as a Chrome Web Store release candidate. The remaini
 ## 1. Validate and package
 
 ```bash
-python3 scripts/test.py
 python3 scripts/package.py
+python3 scripts/test.py
 ```
 
 Upload only:
 
-`dist/stability-guard-for-chatgpt-1.0.5.zip`
+`dist/stability-guard-for-chatgpt-1.0.6.zip`
 
 The packaging script removes the local development `key` from the Store ZIP. After the first Dashboard upload, use the Store item's public key for local development if you want the unpacked build to share the Store item ID.
 
@@ -19,6 +19,7 @@ The packaging script removes the local development `key` from the Store ZIP. Aft
 
 Required assets prepared in `store-assets/`:
 
+- `icon-128.png` — 128x128 padded Chrome Web Store icon
 - `promo-440x280.png` — required small promotional image
 - `screenshot-1-1280x800.png` — first-run disclosure screenshot
 - `screenshot-2-1280x800.png` — settings / compatibility screenshot

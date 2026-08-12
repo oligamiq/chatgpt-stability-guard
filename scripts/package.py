@@ -2,11 +2,14 @@
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 import json
+import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
 DIST.mkdir(exist_ok=True)
-manifest = json.loads((ROOT / 'manifest.json').read_text())
+subprocess.run([sys.executable, str(ROOT / 'scripts' / 'generate_icons.py')], check=True)
+manifest = json.loads((ROOT / 'manifest.json').read_text(encoding='utf-8'))
 version = manifest['version']
 out = DIST / f'stability-guard-for-chatgpt-{version}.zip'
 

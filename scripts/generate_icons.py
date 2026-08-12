@@ -28,10 +28,10 @@ def tag_name(element) -> str:
     return element.tag.rsplit("}", 1)[-1]
 
 
-def render(size: int) -> Image.Image:
+def render(size: int, pad: int | None = None) -> Image.Image:
     root = ET.parse(SVG).getroot()
-    pad_by_size = {16: 1, 32: 2, 48: 4, 128: 16}
-    pad = pad_by_size[size]
+    if pad is None:
+        pad = {16: 1, 32: 2, 48: 4, 128: 0}[size]
     zoom = (64 - (128 * pad / size)) / 48
     image = Image.new("RGBA", (BASE * SS, BASE * SS), (7, 89, 133, 0))
     draw = ImageDraw.Draw(image)
@@ -70,7 +70,7 @@ def main() -> None:
     for size in (16, 32, 48, 128):
         generated[size] = render(size)
         generated[size].save(ICONS / f"icon{size}.png", "PNG", optimize=True)
-    generated[128].save(STORE / "icon-128.png", "PNG", optimize=True)
+    render(128, pad=16).save(STORE / "icon-128.png", "PNG", optimize=True)
 
 
 if __name__ == "__main__":

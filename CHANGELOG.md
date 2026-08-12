@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 — 2026-08-13
+
+- Replaced the extension and Chrome Web Store icon with a simpler chat-bubble and shield design optimized for small sizes.
+- Added a vector SVG source plus a reproducible icon-generation script for 16, 32, 48, and 128 px assets.
+- Kept the packaged 128 px extension icon full-size while generating a separate padded 128 px asset for the Chrome Web Store listing.
+
 ## 1.0.5 — 2026-08-13
 
 - Added an optional filter for stale ChatGPT app-template loading errors (`Failed to fetch template`), enabled by default.
