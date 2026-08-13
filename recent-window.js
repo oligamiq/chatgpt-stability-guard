@@ -4,6 +4,7 @@
   const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
   const ROOT = document.documentElement;
   const DEFAULTS = { enabled: true, showRecentOnly: false, recentExchanges: 3 };
+  const LOADING_WATCHDOG_MS = 60000;
 
   const state = {
     active: false,
@@ -50,7 +51,9 @@
     drag: null,
     lastMergeScrollTop: null,
     lastWindowKeys: [],
-    bottomTailEvidence: null
+    bottomTailEvidence: null,
+    loadingRemoveTimer: 0,
+    loadingWatchdogTimer: 0
   };
 
   chrome.storage.local.get(
@@ -70,6 +73,138 @@
 
   function isShareRoute() {
     return location.pathname.startsWith('/share/');
+  }
+
+  function isConversationRoute() {
+    return location.pathname.startsWith('/c/') || isShareRoute();
+  }
+
+  function loadingCopy(stage, confirmed, total) {
+    const japanese = String(navigator.language || '').toLowerCase().startsWith('ja');
+    const count = japanese
+      ? `${Math.min(confirmed, total)} / ${total} 対話を確認済み`
+      : `${Math.min(confirmed, total)} / ${total} exchanges confirmed`;
+    const details = japanese
+      ? {
+          detecting: '会話を検出しています…',
+          latest: '最新の会話を確認しています…',
+          history: '必要な過去の対話を確認しています…',
+          finalizing: '表示範囲を調整しています…',
+          ready: '準備が完了しました',
+          waiting: 'ChatGPT の会話データを待っています…'
+        }
+      : {
+          detecting: 'Detecting conversation…',
+          latest: 'Checking the latest conversation…',
+          history: 'Checking the required earlier exchanges…',
+          finalizing: 'Adjusting the visible range…',
+          ready: 'Ready',
+          waiting: 'Waiting for ChatGPT conversation data…'
+        };
+    return {
+      title: japanese ? '直近の会話を準備中' : 'Preparing recent conversation',
+      detail: `${details[stage] || details.detecting} ${count}`
+    };
+  }
+
+  function discoveredExchangeCount() {
+    if (!state.sequence.length) return 0;
+    return isShareRoute() ? exchangeStartKeys().length : userKeys().length;
+  }
+
+  function ensureLoadingIndicator() {
+    if (!state.active || !isConversationRoute()) return null;
+    clearTimeout(state.loadingRemoveTimer);
+    state.loadingRemoveTimer = 0;
+    let loading = document.getElementById('csg-recent-loading');
+    if (!loading) {
+      loading = document.createElement('div');
+      loading.id = 'csg-recent-loading';
+      loading.setAttribute('role', 'status');
+      loading.setAttribute('aria-live', 'polite');
+      const title = document.createElement('div');
+      title.className = 'csg-recent-loading-title';
+      const detail = document.createElement('div');
+      detail.className = 'csg-recent-loading-detail';
+      const progress = document.createElement('div');
+      progress.className = 'csg-recent-loading-progress';
+      progress.setAttribute('aria-hidden', 'true');
+      loading.replaceChildren(title, detail, progress);
+      ROOT.appendChild(loading);
+    }
+    loading.dataset.owner = 'recent-window';
+    return loading;
+  }
+
+  function updateLoadingIndicator(stage = 'detecting') {
+    const loading = ensureLoadingIndicator();
+    if (!loading) return;
+    const confirmed = Math.min(state.n, discoveredExchangeCount());
+    const copy = loadingCopy(stage, confirmed, state.n);
+    loading.dataset.stage = stage;
+    loading.dataset.confirmed = String(confirmed);
+    loading.dataset.total = String(state.n);
+    loading.querySelector('.csg-recent-loading-title').textContent = copy.title;
+    loading.querySelector('.csg-recent-loading-detail').textContent = copy.detail;
+    const progress = loading.querySelector('.csg-recent-loading-progress');
+    const slots = Math.min(5, state.n);
+    if (progress.childElementCount !== slots) {
+      progress.replaceChildren(...Array.from({ length: slots }, () => {
+        const step = document.createElement('span');
+        step.className = 'csg-recent-loading-step';
+        return step;
+      }));
+    }
+    const visibleDone = state.n <= slots
+      ? confirmed
+      : Math.floor((confirmed / state.n) * slots);
+    [...progress.children].forEach((step, index) => {
+      step.dataset.done = index < visibleDone ? 'true' : 'false';
+    });
+  }
+
+  function removeLoadingIndicator(complete = false) {
+    clearTimeout(state.loadingRemoveTimer);
+    state.loadingRemoveTimer = 0;
+    const loading = document.getElementById('csg-recent-loading');
+    if (!loading) return;
+    if (!complete) {
+      loading.remove();
+      return;
+    }
+    state.loadingRemoveTimer = setTimeout(() => {
+      const live = document.getElementById('csg-recent-loading');
+      if (!live) {
+        state.loadingRemoveTimer = 0;
+        return;
+      }
+      live.classList.add('csg-recent-loading-complete');
+      state.loadingRemoveTimer = setTimeout(() => {
+        document.getElementById('csg-recent-loading')?.remove();
+        state.loadingRemoveTimer = 0;
+      }, 140);
+    }, 650);
+  }
+
+  function clearLoadingWatchdog() {
+    clearTimeout(state.loadingWatchdogTimer);
+    state.loadingWatchdogTimer = 0;
+  }
+
+  function armLoadingWatchdog() {
+    clearLoadingWatchdog();
+    if (!state.active || !isConversationRoute()) return;
+    const epoch = state.epoch;
+    state.loadingWatchdogTimer = setTimeout(() => {
+      state.loadingWatchdogTimer = 0;
+      if (!isCurrentEpoch(epoch) || !state.active || state.ready || state.suspended) return;
+      state.epoch += 1;
+      state.initializing = false;
+      state.initializingEpoch = -1;
+      state.recovering = false;
+      state.recoveryEpoch = -1;
+      failOpenRecent();
+    }, LOADING_WATCHDOG_MS);
   }
 
   function getTurns() {
@@ -875,6 +1010,7 @@
     state.initializing = true;
     state.initializingEpoch = epoch;
     publishState('preparing');
+    updateLoadingIndicator('detecting');
     try {
       let turns = getTurns();
       if (!turns.length) {
@@ -891,6 +1027,7 @@
 
       state.scrollHost = findScrollHost(turns[turns.length - 1]);
       attachScrollHost();
+      updateLoadingIndicator('latest');
       const initialTop = scrollTop();
       const initialWasBottom = atBottom(24);
       const initialAnchor = captureViewportAnchor();
@@ -904,6 +1041,7 @@
         setScrollTop(next);
         await wait(75);
         if (!(await mergeStableWindow(epoch))) return;
+        updateLoadingIndicator('history');
         steps += 1;
         if (scrollTop() <= 1 || Math.abs(scrollTop() - before) < 1) {
           reachedTop = true;
@@ -931,6 +1069,7 @@
       }
 
       state.boundaryKey = boundary;
+      updateLoadingIndicator('finalizing');
       let boundaryTurn = findMountedByKey(state.boundaryKey);
       if (!boundaryTurn) {
         for (let i = 0; i < 160 && !boundaryTurn; i += 1) {
@@ -939,6 +1078,7 @@
           setScrollTop(next);
           await wait(75);
           if (!(await mergeStableWindow(epoch))) return;
+          updateLoadingIndicator('finalizing');
           boundaryTurn = findMountedByKey(state.boundaryKey);
           if (next <= 1 && !boundaryTurn) break;
         }
@@ -1016,6 +1156,8 @@
       updateMinimum();
       scheduleCoordinateStabilization();
       publishState('ready');
+    } catch (_error) {
+      if (isCurrentEpoch(epoch)) failOpenRecent();
     } finally {
       if (state.initializingEpoch === epoch) {
         state.initializing = false;
@@ -1517,6 +1659,18 @@
   function publishState(value) {
     ROOT.dataset.csgRecentState = value;
     publishCounts();
+    if (!state.active || value === 'off' || value === 'degraded') {
+      clearLoadingWatchdog();
+      removeLoadingIndicator(false);
+    } else if (value === 'ready') {
+      clearLoadingWatchdog();
+      updateLoadingIndicator('ready');
+      removeLoadingIndicator(true);
+    } else if (value === 'waiting') {
+      updateLoadingIndicator('waiting');
+    } else if (value === 'preparing') {
+      updateLoadingIndicator('detecting');
+    }
   }
 
   function clearMountedMarks() {
@@ -1530,6 +1684,10 @@
     clearTimeout(state.contentTimer);
     clearTimeout(state.roleConfirmTimer);
     clearTimeout(state.coordinateTimer);
+    clearTimeout(state.loadingRemoveTimer);
+    state.loadingRemoveTimer = 0;
+    clearLoadingWatchdog();
+    removeLoadingIndicator(false);
     clearBoundaryGrace();
     state.scheduled = 0;
     state.contentTimer = 0;
@@ -1570,6 +1728,7 @@
     ROOT.classList.remove('csg-show-recent-only');
     if (state.scrollbar) state.scrollbar.hidden = true;
     publishState('preparing');
+    armLoadingWatchdog();
   }
 
   function onRouteSignal() {
@@ -1581,6 +1740,7 @@
 
   function start() {
     publishState('preparing');
+    armLoadingWatchdog();
     attachObserver();
     window.addEventListener('resize', onResize, { passive: true });
     window.addEventListener('keydown', onKeyDown, true);

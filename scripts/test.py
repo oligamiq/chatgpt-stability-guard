@@ -21,6 +21,7 @@ def main():
         run(node, '--check', script)
     run(sys.executable, 'scripts/test_old_app_errors.py')
     run(sys.executable, 'scripts/test_recent_window.py')
+    run(sys.executable, 'scripts/test_loading_indicator.py')
     print('ALL TESTS OK')
 
 

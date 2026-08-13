@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.8 — 2026-08-13
+
+- Added a progressive recent-N loading indicator so long conversations no longer appear blank while the visible range is being discovered.
+- Shows staged states for conversation detection, latest-turn checking, earlier-history discovery, final range adjustment, and completion.
+- Starts the indicator at `document_start` when recent-N is enabled, then hands it off to the main recent-window logic without duplicating the UI.
+- Progress reflects the currently confirmed exchange count and can correct itself when ChatGPT virtualizes or reclassifies turns.
+- Added a 60-second fail-open watchdog and exception handling so a stalled initialization cannot leave the loading indicator on screen indefinitely.
+- Added delayed completion removal for accessible status announcement and a 12-second early-loader fallback when the main script never adopts it.
+- Added headless-Chrome tests for early loading display, progressive handoff/removal, and watchdog fail-open behavior.
+
 ## 1.0.7 — 2026-08-13
 
 - Fixed recent-N on long ChatGPT share conversations that keep sparse old turns mounted while virtualizing the middle of the thread.

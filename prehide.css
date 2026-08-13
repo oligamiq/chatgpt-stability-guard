@@ -1,3 +1,83 @@
 .csg-prehide-tool-block {
   display: none !important;
 }
+
+#csg-recent-loading {
+  position: fixed;
+  left: 50%;
+  bottom: max(28px, env(safe-area-inset-bottom));
+  z-index: 2147483647;
+  width: min(420px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 14px 16px 13px;
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, Canvas 94%, transparent);
+  color: CanvasText;
+  box-shadow: 0 10px 34px color-mix(in srgb, CanvasText 14%, transparent);
+  backdrop-filter: blur(12px);
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  pointer-events: none;
+  font: 13px/1.35 system-ui, sans-serif;
+  animation: csg-recent-loading-enter 140ms ease-out 120ms forwards;
+}
+
+#csg-recent-loading.csg-recent-loading-complete {
+  animation: none;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.csg-recent-loading-title {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.csg-recent-loading-detail {
+  margin-top: 4px;
+  color: color-mix(in srgb, CanvasText 68%, transparent);
+  font-size: 12px;
+}
+
+.csg-recent-loading-progress {
+  display: flex;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.csg-recent-loading-step {
+  height: 4px;
+  min-width: 16px;
+  flex: 1 1 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, CanvasText 13%, transparent);
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.csg-recent-loading-step[data-done="true"] {
+  background: color-mix(in srgb, CanvasText 62%, transparent);
+  transform: scaleY(1.15);
+}
+
+@keyframes csg-recent-loading-enter {
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #csg-recent-loading,
+  #csg-recent-loading.csg-recent-loading-complete,
+  .csg-recent-loading-step {
+    animation: none;
+    transition: none;
+  }
+  #csg-recent-loading {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
