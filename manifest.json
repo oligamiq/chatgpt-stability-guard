@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stability Guard for ChatGPT",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Reduces rendering churn in long ChatGPT chats. Built for the current ChatGPT web UI; site updates may require an extension update.",
   "permissions": [
     "storage"

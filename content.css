@@ -77,8 +77,8 @@ html.csg-freeze-old .csg-frozen {
 
 #csg-status {
   position: fixed;
-  right: 10px;
-  bottom: 10px;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
   z-index: 2147483647;
   padding: 5px 8px;
   border-radius: 8px;
@@ -111,4 +111,22 @@ html.csg-compact-traces .csg-tool {
 html.csg-compact-traces .csg-trace-body {
   content-visibility: auto;
   contain-intrinsic-size: auto 240px;
+}
+
+@media (pointer: coarse) {
+  #csg-recent-scrollbar {
+    width: 16px;
+    background: transparent;
+  }
+
+  #csg-recent-scrollbar-thumb {
+    width: 12px;
+    margin-left: auto;
+    background: color-mix(in srgb, CanvasText 48%, transparent);
+  }
+
+  html.csg-compact-traces .csg-thinking,
+  html.csg-compact-traces .csg-tool {
+    -webkit-overflow-scrolling: touch;
+  }
 }

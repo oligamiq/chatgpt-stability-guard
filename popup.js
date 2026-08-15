@@ -41,13 +41,21 @@ function normalizeSettings(raw = {}) {
 }
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  activeTab = tabs[0] || null;
+  if (!chrome.tabs?.query) {
+    activeTab = null;
+    return null;
+  }
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    activeTab = tabs[0] || null;
+  } catch {
+    activeTab = null;
+  }
   return activeTab;
 }
 
 async function send(message) {
-  if (!activeTab?.id) return null;
+  if (!activeTab?.id || !chrome.tabs?.sendMessage) return null;
   try { return await chrome.tabs.sendMessage(activeTab.id, message); }
   catch { return null; }
 }
@@ -169,9 +177,13 @@ async function setPreset(maximum) {
 }
 
 async function reloadCurrentTab() {
-  if (!activeTab?.id) return;
-  await chrome.tabs.reload(activeTab.id);
-  window.close();
+  if (!activeTab?.id || !chrome.tabs?.reload) return;
+  try {
+    await chrome.tabs.reload(activeTab.id);
+    window.close();
+  } catch {
+    updatePendingNotice();
+  }
 }
 
 async function acceptConsent() {
@@ -191,10 +203,14 @@ async function acceptConsent() {
 async function revokeConsent() {
   privacyConsent = false;
   await chrome.storage.local.remove(['privacyConsent', 'privacyConsentVersion', 'privacyConsentAt']);
-  if (activeTab?.id && targetAvailable) {
-    await chrome.tabs.reload(activeTab.id);
-    window.close();
-    return;
+  if (activeTab?.id && targetAvailable && chrome.tabs?.reload) {
+    try {
+      await chrome.tabs.reload(activeTab.id);
+      window.close();
+      return;
+    } catch {
+      // Keep the popup usable when a mobile browser denies tab reload from the action UI.
+    }
   }
   showConsentIfNeeded();
   updatePendingNotice();

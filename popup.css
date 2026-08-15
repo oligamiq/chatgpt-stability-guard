@@ -1,6 +1,6 @@
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
-body { margin:0; width:410px; overflow-x:hidden; background:Canvas; color:CanvasText; font:13px/1.4 system-ui,sans-serif; }
+body { margin:0; width:410px; max-width:100vw; max-height:100dvh; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; background:Canvas; color:CanvasText; font:13px/1.4 system-ui,sans-serif; }
 header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 12px; border-bottom:1px solid color-mix(in srgb,CanvasText 13%,transparent); }
 .title-wrap strong { display:block; font-size:14px; }
 .title-wrap small { display:block; margin-top:2px; opacity:.62; }
@@ -61,3 +61,22 @@ footer { display:flex; flex-wrap:wrap; justify-content:space-between; align-item
 footer a { color:inherit; }
 .link-button { min-height:0; padding:0; border:0; border-radius:0; background:none; color:inherit; font:inherit; text-decoration:underline; }
 .link-button:hover { background:none !important; }
+
+@media (max-width: 430px), (pointer: coarse) {
+  body { width:100vw; min-width:0; font-size:14px; }
+  header { padding:14px max(14px, env(safe-area-inset-right)) 12px max(14px, env(safe-area-inset-left)); gap:12px; }
+  main { padding:4px max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+  .notice,.compat-notice,.consent { margin-left:max(14px, env(safe-area-inset-left)); margin-right:max(14px, env(safe-area-inset-right)); }
+  .setting { min-height:50px; }
+  .setting input[type="checkbox"] { width:40px; height:24px; }
+  .setting input[type="checkbox"]::after { width:18px; height:18px; }
+  .setting input[type="checkbox"]:checked::after { transform:translateX(16px); }
+  .row { min-height:48px; }
+  .row input { width:76px; min-height:40px; font-size:16px; }
+  button { min-height:44px; padding:8px 10px; }
+  .buttons { grid-template-columns:1fr; }
+  .switch span { width:46px; height:28px; }
+  .switch span::after { width:20px; height:20px; left:4px; top:4px; }
+  .switch input:checked + span::after { transform:translateX(18px); }
+  footer { font-size:10px; }
+}

@@ -32,4 +32,4 @@ The extension uses the `storage` permission for local settings and runs content 
 The extension is implemented against the current ChatGPT web UI. Changes to ChatGPT's DOM or UI can temporarily break detection or hiding until the extension is updated.
 
 ## Contact
-For privacy questions, use the developer contact method shown on the extension's Chrome Web Store listing.
+For privacy questions, use the developer contact method shown on the extension's store listing.

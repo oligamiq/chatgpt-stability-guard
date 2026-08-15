@@ -61,6 +61,16 @@ for rel in ['content.css','prehide.css','popup.css','privacy.css']:
     check(not re.search(r'@import\s+[^;]*https?://', text, re.I), f'{rel} contains remote CSS import')
     check(not re.search(r'url\(\s*["\']?https?://', text, re.I), f'{rel} contains remote CSS URL')
 
+popup_css = (ROOT / 'popup.css').read_text()
+recent_js = (ROOT / 'recent-window.js').read_text()
+content_css = (ROOT / 'content.css').read_text()
+check('max-width:100vw' in popup_css and '(pointer: coarse)' in popup_css,
+      'popup.css missing responsive coarse-pointer/mobile layout')
+check('window.visualViewport' in recent_js and 'onVisualViewportChange' in recent_js,
+      'recent-window.js missing Visual Viewport tracking for mobile browser chrome/keyboard changes')
+check('@media (pointer: coarse)' in content_css and '#csg-recent-scrollbar' in content_css,
+      'content.css missing coarse-pointer recent scrollbar sizing')
+
 for rel in ['popup.html','privacy.html']:
     text = (ROOT / rel).read_text()
     check(not re.search(r'<(?:iframe|img|link)[^>]+(?:src|href)=["\']https?://', text, re.I), f'{rel} contains remote embedded resource')
@@ -77,19 +87,25 @@ except Exception as exc:
 
 
 # Publication documentation and compatibility disclosures.
-for rel in ['README.md','PRIVACY.md','PUBLISHING.md','store-assets/listing-ja.md','store-assets/listing-en.md']:
+for rel in ['README.md','PRIVACY.md','PUBLISHING.md','EDGE_SUBMISSION.md','store-assets/listing-ja.md','store-assets/listing-en.md','store-assets/edge-listing-ja.md','store-assets/edge-listing-en.md']:
     check((ROOT / rel).is_file(), f'missing publication file: {rel}')
 
-compat_sources = ['README.md','PRIVACY.md','store-assets/listing-ja.md','store-assets/listing-en.md']
+compat_sources = ['README.md','PRIVACY.md','store-assets/listing-ja.md','store-assets/listing-en.md','store-assets/edge-listing-ja.md','store-assets/edge-listing-en.md']
 for rel in compat_sources:
     text = (ROOT / rel).read_text().lower()
     check('chatgpt' in text and ('dom' in text or 'ui' in text), f'{rel} missing ChatGPT compatibility context')
     check(any(word in text for word in ['update','更新','change','変更']), f'{rel} missing site-update breakage disclosure')
 
-# Chrome Web Store image assets.
+for rel in ['store-assets/edge-listing-ja.md','store-assets/edge-listing-en.md']:
+    text = (ROOT / rel).read_text().lower()
+    check('chrome' not in text and 'firefox' not in text and 'safari' not in text,
+          f'{rel} must not reference another browser in Edge store metadata')
+
+# Store image assets.
 try:
     from PIL import Image
     store_images = {
+        'store-assets/edge-logo-300.png': (300,300),
         'store-assets/promo-440x280.png': (440,280),
         'store-assets/screenshot-1-1280x800.png': (1280,800),
         'store-assets/screenshot-2-1280x800.png': (1280,800),

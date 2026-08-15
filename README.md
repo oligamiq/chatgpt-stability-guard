@@ -45,6 +45,17 @@
 
 **Load unpackedは選択したフォルダを実体として参照するため、読込後にそのフォルダを削除・移動しないこと。**
 
+## Microsoft Edge for Android
+
+1.0.9以降はAndroid版Microsoft Edgeを互換対象に含める。ManifestはChrome/Edge共通のMV3を維持し、Edge専用の追加権限やネイティブ機能には依存しない。
+
+- 拡張ポップアップは狭い画面・coarse pointer向けに可変幅化し、タッチ対象とsafe areaを拡大。
+- recent-N専用スクロールバーは`VisualViewport`を追跡し、モバイルのアドレスバーやソフトキーボードによる表示領域変化に追従。
+- `chrome.tabs`が一時的に利用できない実装でもポップアップ全体が停止しないようfail-safe化。
+- Store提出物はChrome Web StoreとMicrosoft Edge Add-onsで同じ`dist/stability-guard-for-chatgpt-<version>.zip`を使用できる。
+
+Android版Edgeでの一般配布はMicrosoft Edge Add-ons側でモバイル対応として提供されることを前提とする。デスクトップ向けの`Load unpacked`手順をAndroidでも利用できるとは仮定しない。
+
 ## 検証
 
 ```bash
@@ -53,7 +64,7 @@ python3 scripts/test.py
 
 静的検証、JavaScript構文チェック、Headless Chromeによる `Failed to fetch template` 回帰テストをまとめて実行する。
 
-## Chrome Web Store用パッケージ
+## Chrome Web Store / Microsoft Edge Add-ons用パッケージ
 
 ```bash
 python3 scripts/test.py

@@ -71,6 +71,7 @@ def main() -> None:
         generated[size] = render(size)
         generated[size].save(ICONS / f"icon{size}.png", "PNG", optimize=True)
     render(128, pad=16).save(STORE / "icon-128.png", "PNG", optimize=True)
+    render(300, pad=38).save(STORE / "edge-logo-300.png", "PNG", optimize=True)
 
 
 if __name__ == "__main__":

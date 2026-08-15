@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.9 — 2026-08-15
+
+- Added Android Microsoft Edge compatibility work for the extension action popup, including responsive width, mobile-safe scrolling, safe-area padding, larger touch targets, and single-column preset controls on narrow/coarse-pointer layouts.
+- Made popup tab messaging/reload paths fail safely when a mobile Chromium build exposes a reduced or temporarily unavailable `chrome.tabs` surface.
+- Updated recent-N viewport calculations to track the Visual Viewport so its dedicated scrollbar follows mobile browser chrome, soft-keyboard, and viewport-size changes.
+- Increased the recent-N scrollbar touch target on coarse-pointer devices and made compact trace scrollers friendlier to touch momentum.
+- Added validation guardrails so the mobile/coarse-pointer and Visual Viewport support cannot be removed accidentally.
+- Prepared the same Manifest V3 package for Microsoft Edge Add-ons submission; no Edge-specific privileged API or additional permission is required.
+- Added Edge-specific browser-neutral store listing copy, a 300×300 listing logo, and a copy-ready Partner Center submission/privacy sheet.
+
 ## 1.0.8 — 2026-08-13
 
 - Added a progressive recent-N loading indicator so long conversations no longer appear blank while the visible range is being discovered.

@@ -1,6 +1,6 @@
-# Chrome Web Store publishing checklist
+# Chrome Web Store / Microsoft Edge Add-ons publishing checklist
 
-This repository is prepared as a Chrome Web Store release candidate. The remaining steps require the developer's Chrome Web Store account and a publicly hosted privacy-policy URL.
+This repository is prepared as a Chromium extension release candidate for both Chrome Web Store and Microsoft Edge Add-ons. The remaining steps require the relevant publisher account and a publicly hosted privacy-policy URL.
 
 ## 1. Validate and package
 
@@ -11,7 +11,7 @@ python3 scripts/test.py
 
 Upload only:
 
-`dist/stability-guard-for-chatgpt-1.0.8.zip`
+`dist/stability-guard-for-chatgpt-1.0.9.zip`
 
 The packaging script removes the local development `key` from the Store ZIP. After the first Dashboard upload, use the Store item's public key for local development if you want the unpacked build to share the Store item ID.
 
@@ -20,14 +20,15 @@ The packaging script removes the local development `key` from the Store ZIP. Aft
 Required assets prepared in `store-assets/`:
 
 - `icon-128.png` — 128x128 padded Chrome Web Store icon
-- `promo-440x280.png` — required small promotional image
+- `edge-logo-300.png` — 300x300 Microsoft Edge Add-ons listing logo
+- `promo-440x280.png` — 440x280 promotional image
 - `screenshot-1-1280x800.png` — first-run disclosure screenshot
 - `screenshot-2-1280x800.png` — settings / compatibility screenshot
 - `screenshot-3-1280x800.png` — long-thread controls, including recent-N view (N defaults to 3)
 - `marquee-1400x560.png` — optional marquee promotional image
 - `promo-video-15s.mp4` — YouTube upload source for the Store promo-video URL
-- `listing-ja.md` — Japanese listing copy
-- `listing-en.md` — English listing copy
+- `listing-ja.md` / `listing-en.md` — Chrome Web Store listing copy
+- `edge-listing-ja.md` / `edge-listing-en.md` — browser-neutral Microsoft Edge Add-ons listing copy
 
 The extension package itself includes 16/32/48/128 px PNG icons under `icons/`. Upload `promo-video-15s.mp4` to a YouTube account controlled by the publisher, then paste that video URL into the Store listing field.
 
@@ -100,7 +101,15 @@ Suggested review instructions:
 
 No special account credentials are provided by the extension. Some ChatGPT UI elements only appear when the user's ChatGPT account/session produces those features.
 
-## 9. Before clicking Submit for Review
+## 9. Microsoft Edge Add-ons / Android
+
+Use the same Store ZIP for Microsoft Edge Add-ons. The runtime remains Manifest V3, requests only `storage`, and uses the same `https://chatgpt.com/*` content-script scope.
+
+For Edge review, explicitly mention that Android/mobile use is supported by the responsive action popup, coarse-pointer controls, and Visual Viewport tracking used by the recent-N scrollbar. Do not claim Android sideloading as the normal installation path; general users should install through Microsoft Edge Add-ons when the listing is available to Edge mobile.
+
+Before submitting to Edge Add-ons, test both a desktop Edge build and a current Android Edge build with the same release ZIP/listing version. Mobile compatibility is a browser/store distribution decision in addition to extension code compatibility, so acceptance into or visibility within Edge's mobile extension catalog is not controlled by the manifest alone.
+
+## 10. Before clicking Submit for Review
 
 - Run `python3 scripts/test.py` again.
 - Verify the privacy-policy URL is public and matches the Dashboard disclosures.

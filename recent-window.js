@@ -755,9 +755,20 @@
     else host.scrollTop = top;
   }
 
+  function visualViewportRect() {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return { top: 0, right: window.innerWidth, bottom: window.innerHeight, height: window.innerHeight };
+    }
+    const top = Math.max(0, viewport.offsetTop || 0);
+    const right = Math.min(window.innerWidth, (viewport.offsetLeft || 0) + viewport.width);
+    const height = Math.max(1, viewport.height);
+    return { top, right, bottom: top + height, height };
+  }
+
   function viewportHeight() {
     const host = state.scrollHost;
-    return host === document.scrollingElement ? window.innerHeight : (host?.clientHeight || window.innerHeight);
+    return host === document.scrollingElement ? visualViewportRect().height : (host?.clientHeight || visualViewportRect().height);
   }
 
   function maxScrollTop() {
@@ -1428,6 +1439,11 @@
     layoutScrollbar();
   }
 
+  function onVisualViewportChange() {
+    if (!state.ready) return;
+    layoutScrollbar();
+  }
+
   function onScroll() {
     if (!state.ready) return;
     // Virtualizer height corrections can move the mounted semantic boundary while
@@ -1625,16 +1641,17 @@
       return;
     }
     const host = state.scrollHost;
+    const viewport = visualViewportRect();
     const rect = host === document.scrollingElement
-      ? { top: 0, right: window.innerWidth, height: window.innerHeight }
+      ? { top: viewport.top, right: viewport.right, height: viewport.height }
       : host.getBoundingClientRect();
-    const trackTop = Math.max(0, rect.top);
-    const visibleBottom = Math.min(window.innerHeight, rect.top + rect.height);
+    const trackTop = Math.max(viewport.top, rect.top);
+    const visibleBottom = Math.min(viewport.bottom, rect.top + rect.height);
     const trackHeight = Math.max(28, visibleBottom - trackTop);
     state.scrollbar.hidden = false;
     Object.assign(state.scrollbar.style, {
       top: `${trackTop}px`,
-      right: `${Math.max(0, window.innerWidth - rect.right + 2)}px`,
+      right: `${Math.max(0, window.innerWidth - Math.min(rect.right, viewport.right) + 2)}px`,
       height: `${trackHeight}px`
     });
 
@@ -1743,6 +1760,8 @@
     armLoadingWatchdog();
     attachObserver();
     window.addEventListener('resize', onResize, { passive: true });
+    window.visualViewport?.addEventListener('resize', onVisualViewportChange, { passive: true });
+    window.visualViewport?.addEventListener('scroll', onVisualViewportChange, { passive: true });
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('popstate', onRouteSignal, true);
     window.navigation?.addEventListener?.('currententrychange', onRouteSignal);
