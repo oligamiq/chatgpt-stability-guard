@@ -1,6 +1,6 @@
 # Privacy Policy — Stability Guard for ChatGPT
 
-Last updated: 2026-08-12
+Last updated: 2026-08-15
 
 Stability Guard for ChatGPT is an independent, unofficial browser extension and is not affiliated with or endorsed by OpenAI.
 
