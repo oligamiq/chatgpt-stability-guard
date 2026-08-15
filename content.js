@@ -7,12 +7,12 @@
     }
   });
 
-  chrome.storage.local.get({ privacyConsent: false, privacyConsentVersion: 0 }, ({ privacyConsent, privacyConsentVersion }) => {
+  chrome.storage.local.get({ privacyConsent: false, privacyConsentVersion: 0, uiLanguage: 'auto' }, ({ privacyConsent, privacyConsentVersion, uiLanguage }) => {
     if (privacyConsent !== true || privacyConsentVersion !== 1) return;
-    runGuard();
+    runGuard(uiLanguage);
   });
 
-  function runGuard() {
+  function runGuard(uiLanguage) {
 
     const DEFAULTS = {
       enabled: true,
@@ -35,6 +35,7 @@
 
     const state = {
       settings: { ...DEFAULTS },
+      uiLanguage: ['ja', 'en'].includes(uiLanguage) ? uiLanguage : (String(navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en'),
       pendingRoots: new Set(),
       textToolShells: new Set(),
       toolShellMarkers: new Map(),
@@ -701,7 +702,9 @@
       if (!el) return;
       const s = state.settings;
       el.dataset.active = String(Boolean(s.enabled && s.showStatus));
-      el.textContent = `Guard · stable rendering · lazy ${state.stats.frozen}`;
+      el.textContent = state.uiLanguage === 'ja'
+        ? `Guard · 安定描画 · 遅延 ${state.stats.frozen}`
+        : `Guard · stable rendering · deferred ${state.stats.frozen}`;
     }
 
 

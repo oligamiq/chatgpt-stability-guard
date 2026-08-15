@@ -6,3 +6,6 @@ h3 { font-size:15px; }
 code { padding:2px 5px; border-radius:5px; background:color-mix(in srgb,CanvasText 7%,Canvas); }
 .note { padding:12px 14px; border-left:3px solid Highlight; background:color-mix(in srgb,Highlight 6%,Canvas); }
 small { opacity:.65; }
+.privacy-toolbar { display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:18px; font-size:12px; }
+.privacy-toolbar select { min-height:32px; padding:4px 8px; border:1px solid color-mix(in srgb,CanvasText 18%,transparent); border-radius:8px; background:Canvas; color:CanvasText; }
+[hidden] { display:none !important; }

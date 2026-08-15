@@ -33,3 +33,5 @@ Androidを含むモバイル環境では、狭い画面・タッチ操作・safe
 
 ## 検索語候補
 ChatGPT, performance, long chat, rendering, stability, mobile
+
+拡張UIは日本語と英語に対応し、既定ではブラウザ言語を自動判定する。ポップアップから手動で言語を切り替えることもできる。

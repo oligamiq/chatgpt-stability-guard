@@ -45,6 +45,10 @@
 
 **Load unpackedは選択したフォルダを実体として参照するため、読込後にそのフォルダを削除・移動しないこと。**
 
+## 日本語 / English UI
+
+1.0.10以降、拡張UIは日本語と英語に対応する。既定は `Auto` でブラウザ言語が日本語なら日本語、それ以外は英語を表示する。ポップアップの言語セレクタから `日本語` / `English` を明示的に選択でき、設定は `chrome.storage.local` に保存される。Privacy画面、recent-Nの進捗表示、ページ内Guard状態表示にも同じ選択を適用する。
+
 ## Microsoft Edge for Android
 
 1.0.9以降はAndroid版Microsoft Edgeを互換対象に含める。ManifestはChrome/Edge共通のMV3を維持し、Edge専用の追加権限やネイティブ機能には依存しない。

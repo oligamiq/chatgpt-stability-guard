@@ -13,7 +13,14 @@
       <small class="unofficial">非公式拡張 · OpenAIとは無関係</small>
       <small id="pageState">対象タブを確認中</small>
     </div>
-    <label class="switch master" title="拡張機能全体"><input id="enabled" type="checkbox"><span></span></label>
+    <div class="header-actions">
+      <select id="uiLanguage" aria-label="Language / 言語">
+        <option value="auto">Auto</option>
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+      </select>
+      <label class="switch master" title="拡張機能全体"><input id="enabled" type="checkbox"><span></span></label>
+    </div>
   </header>
 
   <section id="consentPanel" class="consent" hidden>
@@ -24,7 +31,7 @@
       <li>解析・広告・テレメトリ用の外部通信を行わない</li>
       <li>拡張設定と同意状態のみを端末内の拡張ローカルストレージへ保存する</li>
     </ul>
-    <label class="consent-check"><input id="consentCheck" type="checkbox"> 上記のローカル処理に同意する</label>
+    <label class="consent-check"><input id="consentCheck" type="checkbox"><span id="consentCheckLabel">上記のローカル処理に同意する</span></label>
     <button id="acceptConsent" class="primary" type="button" disabled>同意して有効化</button>
     <button id="declineConsent" type="button">同意せず閉じる</button>
     <a class="policy-link" href="privacy.html" target="_blank" rel="noreferrer">プライバシーポリシーを読む</a>

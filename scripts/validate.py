@@ -10,12 +10,24 @@ def check(cond, msg):
     if not cond: errors.append(msg)
 
 check(manifest.get('manifest_version') == 3, 'manifest_version must be 3')
-check(manifest.get('name') == 'Stability Guard for ChatGPT', 'unexpected extension name')
-check(len(manifest.get('name','')) <= 75, 'name exceeds 75 characters')
-check(len(manifest.get('description','')) <= 132, 'description exceeds 132 characters')
+check(manifest.get('name') == '__MSG_extensionName__', 'extension name must use localized manifest message')
+check(manifest.get('default_locale') == 'en', 'default_locale must be en')
+check(len('Stability Guard for ChatGPT') <= 75, 'name exceeds 75 characters')
+check(manifest.get('description') == '__MSG_extensionDescription__', 'description must use localized manifest message')
 check(manifest.get('permissions') == ['storage'], 'runtime permissions must be storage only')
 check('host_permissions' not in manifest, 'host_permissions should not be present')
 check(manifest.get('incognito') == 'not_allowed', 'incognito should be not_allowed')
+
+for locale in ['en','ja']:
+    rel = f'_locales/{locale}/messages.json'
+    try:
+        messages = json.loads((ROOT / rel).read_text())
+        check(messages.get('extensionName', {}).get('message') == 'Stability Guard for ChatGPT', f'{rel} missing extension name')
+        description = messages.get('extensionDescription', {}).get('message', '')
+        check(bool(description), f'{rel} missing extension description')
+        check(len(description) <= 132, f'{rel} extension description exceeds 132 characters')
+    except Exception as exc:
+        errors.append(f'{rel} invalid: {exc}')
 
 # Public defaults for the long-thread limiter.
 for rel in ['content.js', 'popup.js', 'recent-window.js']:
@@ -39,18 +51,19 @@ for entry in scripts:
 
 runtime_files = {
     'content.js','recent-window.js','content.css','prehide.js','prehide.css',
-    'popup.html','popup.css','popup.js','privacy.html','privacy.css',
-    'icons/icon16.png','icons/icon32.png','icons/icon48.png','icons/icon128.png'
+    'popup.html','popup.css','popup.js','privacy.html','privacy.css','privacy.js',
+    'icons/icon16.png','icons/icon32.png','icons/icon48.png','icons/icon128.png',
+    '_locales/en/messages.json','_locales/ja/messages.json'
 }
 for rel in runtime_files:
     check((ROOT / rel).is_file(), f'missing runtime file: {rel}')
 
 # Static remote-code / telemetry guardrails.
-for rel in ['content.js','recent-window.js','prehide.js','popup.js']:
+for rel in ['content.js','recent-window.js','prehide.js','popup.js','privacy.js']:
     text = (ROOT / rel).read_text()
     for token in ['eval(', 'new Function', 'XMLHttpRequest', 'WebSocket(', 'fetch(']:
         check(token not in text, f'{rel} contains disallowed/remote-capable token: {token}')
-    check('privacyConsent' in text if rel != 'popup.js' else True, f'{rel} missing privacy consent gate')
+    check('privacyConsent' in text if rel not in ['popup.js','privacy.js'] else True, f'{rel} missing privacy consent gate')
 
 for rel in ['popup.html','privacy.html']:
     text = (ROOT / rel).read_text()
@@ -70,6 +83,18 @@ check('window.visualViewport' in recent_js and 'onVisualViewportChange' in recen
       'recent-window.js missing Visual Viewport tracking for mobile browser chrome/keyboard changes')
 check('@media (pointer: coarse)' in content_css and '#csg-recent-scrollbar' in content_css,
       'content.css missing coarse-pointer recent scrollbar sizing')
+
+popup_html = (ROOT / 'popup.html').read_text()
+popup_js = (ROOT / 'popup.js').read_text()
+privacy_html = (ROOT / 'privacy.html').read_text()
+check('id="uiLanguage"' in popup_html and 'value="ja"' in popup_html and 'value="en"' in popup_html,
+      'popup language selector must provide Japanese and English')
+check("uiLanguage: 'auto'" in popup_js and "const COPY =" in popup_js,
+      'popup.js missing persistent Japanese/English localization')
+check('id="privacyJa"' in privacy_html and 'id="privacyEn"' in privacy_html and 'privacy.js' in privacy_html,
+      'privacy page must provide Japanese and English content')
+for rel in ['prehide.js','recent-window.js','content.js']:
+    check('uiLanguage' in (ROOT / rel).read_text(), f'{rel} missing UI language propagation')
 
 for rel in ['popup.html','privacy.html']:
     text = (ROOT / rel).read_text()

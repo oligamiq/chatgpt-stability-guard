@@ -53,14 +53,16 @@
     lastWindowKeys: [],
     bottomTailEvidence: null,
     loadingRemoveTimer: 0,
-    loadingWatchdogTimer: 0
+    loadingWatchdogTimer: 0,
+    uiLanguage: 'auto'
   };
 
   chrome.storage.local.get(
-    { privacyConsent: false, privacyConsentVersion: 0, settings: DEFAULTS },
-    ({ privacyConsent, privacyConsentVersion, settings }) => {
+    { privacyConsent: false, privacyConsentVersion: 0, settings: DEFAULTS, uiLanguage: 'auto' },
+    ({ privacyConsent, privacyConsentVersion, settings, uiLanguage }) => {
       if (privacyConsent !== true || privacyConsentVersion !== 1) return;
       const merged = { ...DEFAULTS, ...(settings || {}) };
+      state.uiLanguage = ['auto', 'ja', 'en'].includes(uiLanguage) ? uiLanguage : 'auto';
       state.active = merged.enabled !== false && merged.showRecentOnly === true;
       state.n = Math.max(1, Math.min(100, Number(merged.recentExchanges) || 3));
       if (!state.active) {
@@ -80,7 +82,8 @@
   }
 
   function loadingCopy(stage, confirmed, total) {
-    const japanese = String(navigator.language || '').toLowerCase().startsWith('ja');
+    const preference = String(state.uiLanguage || 'auto').toLowerCase();
+    const japanese = preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
     const count = japanese
       ? `${Math.min(confirmed, total)} / ${total} 対話を確認済み`
       : `${Math.min(confirmed, total)} / ${total} exchanges confirmed`;

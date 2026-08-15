@@ -5,6 +5,8 @@ header { display:flex; align-items:center; justify-content:space-between; paddin
 .title-wrap strong { display:block; font-size:14px; }
 .title-wrap small { display:block; margin-top:2px; opacity:.62; }
 .title-wrap .unofficial { font-size:10px; opacity:.5; }
+.header-actions { display:flex; align-items:center; gap:8px; }
+#uiLanguage { max-width:94px; min-height:30px; padding:3px 6px; border:1px solid color-mix(in srgb,CanvasText 18%,transparent); border-radius:8px; background:Canvas; color:CanvasText; font:11px system-ui,sans-serif; }
 main { padding:4px 14px 14px; }
 section { padding:11px 0; border-bottom:1px solid color-mix(in srgb,CanvasText 11%,transparent); }
 h2 { margin:0 0 8px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; opacity:.64; }
@@ -65,6 +67,8 @@ footer a { color:inherit; }
 @media (max-width: 430px), (pointer: coarse) {
   body { width:100vw; min-width:0; font-size:14px; }
   header { padding:14px max(14px, env(safe-area-inset-right)) 12px max(14px, env(safe-area-inset-left)); gap:12px; }
+  .header-actions { gap:10px; }
+  #uiLanguage { min-height:40px; max-width:108px; font-size:14px; }
   main { padding:4px max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
   .notice,.compat-notice,.consent { margin-left:max(14px, env(safe-area-inset-left)); margin-right:max(14px, env(safe-area-inset-right)); }
   .setting { min-height:50px; }

@@ -20,8 +20,9 @@ store_manifest.pop('key', None)
 
 files = [
     'content.js','recent-window.js','content.css','prehide.js','prehide.css',
-    'popup.html','popup.css','popup.js','privacy.html','privacy.css',
-    'icons/icon16.png','icons/icon32.png','icons/icon48.png','icons/icon128.png'
+    'popup.html','popup.css','popup.js','privacy.html','privacy.css','privacy.js',
+    'icons/icon16.png','icons/icon32.png','icons/icon48.png','icons/icon128.png',
+    '_locales/en/messages.json','_locales/ja/messages.json'
 ]
 with ZipFile(out, 'w', ZIP_DEFLATED) as z:
     z.writestr('manifest.json', json.dumps(store_manifest, ensure_ascii=False, indent=2) + '\n')

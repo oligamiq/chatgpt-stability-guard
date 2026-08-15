@@ -22,3 +22,4 @@ Features include:
 - Toggle each optimization independently
 
 On mobile devices, including Android, the action UI adapts to narrow screens, touch input, safe areas, and Visual Viewport changes.
+The extension UI supports English and Japanese, uses the browser language by default, and can be switched manually from the popup.

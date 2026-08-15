@@ -1,7 +1,7 @@
-# Microsoft Edge Add-ons submission — 1.0.9
+# Microsoft Edge Add-ons submission — 1.0.10
 
 ## Package
-- ZIP: `dist/stability-guard-for-chatgpt-1.0.9.zip`
+- ZIP: `dist/stability-guard-for-chatgpt-1.0.10.zip`
 - Manifest: MV3
 - Runtime permission: `storage` only
 - Content-script scope: `https://chatgpt.com/*`
@@ -16,6 +16,7 @@
 - Optional screenshots: existing 1280×800 files may be used only after confirming they do not show another browser's branding.
 - Japanese listing: `store-assets/edge-listing-ja.md`
 - English listing: `store-assets/edge-listing-en.md`
+- UI languages: Japanese and English (`Auto` follows the browser language; manual override is available in the popup).
 
 ## Public URLs
 - Website: `https://github.com/oligamiq/chatgpt-stability-guard`

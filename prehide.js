@@ -1,12 +1,12 @@
 (() => {
   'use strict';
 
-  chrome.storage.local.get({ privacyConsent: false, privacyConsentVersion: 0 }, ({ privacyConsent, privacyConsentVersion }) => {
+  chrome.storage.local.get({ privacyConsent: false, privacyConsentVersion: 0, uiLanguage: 'auto' }, ({ privacyConsent, privacyConsentVersion, uiLanguage }) => {
     if (privacyConsent !== true || privacyConsentVersion !== 1) return;
-    runGuard();
+    runGuard(uiLanguage);
   });
 
-  function runGuard() {
+  function runGuard(uiLanguage) {
 
     const marked = new Set();
     const partsByBlock = new WeakMap();
@@ -36,7 +36,8 @@
     }
 
     function loadingCopy() {
-      const japanese = String(navigator.language || '').toLowerCase().startsWith('ja');
+      const preference = String(uiLanguage || 'auto').toLowerCase();
+      const japanese = preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
       return japanese
         ? { title: '直近の会話を準備中', detail: '会話を検出しています…' }
         : { title: 'Preparing recent conversation', detail: 'Detecting conversation…' };

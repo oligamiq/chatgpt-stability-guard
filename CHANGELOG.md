@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.10 — 2026-08-15
+
+- Added complete Japanese/English extension UI support with automatic browser-language selection.
+- Added an `Auto / 日本語 / English` language selector in the popup; the preference is stored locally and does not require new permissions.
+- Localized first-use consent, settings, status/statistics text, reload notices, and long-conversation controls.
+- Added bilingual in-extension Privacy content with the same persisted language preference.
+- Propagated the selected language to recent-N loading progress and the in-page Guard status indicator.
+- Kept Japanese ChatGPT UI detection strings intact because they are matching logic, not extension UI copy.
+
 ## 1.0.9 — 2026-08-15
 
 - Added Android Microsoft Edge compatibility work for the extension action popup, including responsive width, mobile-safe scrolling, safe-area padding, larger touch targets, and single-column preset controls on narrow/coarse-pointer layouts.

@@ -40,3 +40,5 @@ The extension presents this local-processing disclosure in-product and requires 
 
 ### Unofficial
 This is an independent, unofficial extension. It is not created, endorsed, certified, or sponsored by OpenAI.
+
+The extension UI supports English and Japanese, uses the browser language by default, and can be switched manually from the popup.

@@ -1,21 +1,37 @@
 <!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Privacy — Stability Guard for ChatGPT</title><link rel="stylesheet" href="privacy.css"></head>
 <body>
+<div class="privacy-toolbar"><label for="privacyLanguage">Language / 言語</label><select id="privacyLanguage"><option value="auto">Auto</option><option value="ja">日本語</option><option value="en">English</option></select></div>
+<section id="privacyJa" lang="ja" hidden>
 <h1>プライバシーポリシー</h1>
 <p><small>Stability Guard for ChatGPT · 最終更新 2026-08-15</small></p>
 <p class="note">本拡張は独立した非公式拡張であり、OpenAIによる作成・承認・提携製品ではない。</p>
-<h2>処理するデータ</h2>
-<h3>chatgpt.com 上のWebサイト内容</h3>
+<h2>処理するデータ</h2><h3>chatgpt.com 上のWebサイト内容</h3>
 <p>Thinking、ツールtrace、埋め込みツールUI、プレースホルダ、code/log等を識別するため、<code>chatgpt.com</code> の描画済みDOMを端末内で読み取る。会話の近くや内部に存在するDOMを扱うため、処理対象にはユーザー生成コンテンツや個人的な会話内容が含まれる可能性がある。</p>
 <p>この内容は、描画負荷を減らし、ユーザーが選択したChatGPT UI要素を非表示・遅延描画する目的に限ってブラウザ内で処理する。会話内容を拡張機能の永続ストレージへ保存せず、開発者または第三者へ送信しない。</p>
-<h3>ローカル設定</h3>
-<p>拡張設定、同意バージョン、同意時刻のみを <code>chrome.storage.local</code> に保存する。開発者運営サーバーへ送信しない。</p>
-<h2>外部通信</h2>
-<p>解析、広告、テレメトリ、リモート設定、アカウント機能、開発者運営バックエンドを持たず、拡張自身から外部ネットワークリクエストを開始しない。</p>
+<h3>ローカル設定</h3><p>拡張設定、同意バージョン、同意時刻、UI言語設定のみを <code>chrome.storage.local</code> に保存する。開発者運営サーバーへ送信しない。</p>
+<h2>外部通信</h2><p>解析、広告、テレメトリ、リモート設定、アカウント機能、開発者運営バックエンドを持たず、拡張自身から外部ネットワークリクエストを開始しない。</p>
 <h2>共有・販売</h2><p>ユーザーデータを販売・共有・第三者移転しない。</p>
 <h2>保持・同意・削除</h2><p>Webサイト内容はページ内で一時的に処理するだけで、拡張機能は保持しない。ローカル設定は変更・消去・アンインストールまでブラウザプロファイル内に残る。データ処理への同意は拡張ポップアップから取り消せる。ChatGPTタブを検出できる場合は、撤回時にそのタブを再読み込みし、撤回済み状態でDOM処理を停止する。</p>
 <h2>権限</h2><p><code>storage</code> はローカル設定保存に使用する。content scriptは <code>https://chatgpt.com/*</code> のみに限定する。</p>
 <h2>互換性</h2><p>現在のChatGPT Web UIに合わせた実装である。ChatGPT側のDOM/UI更新により、拡張の更新まで一時的に検出や非表示が機能しなくなる場合がある。</p>
 <h2>連絡先</h2><p>拡張機能のストア掲載ページに表示される開発者連絡先を利用する。</p>
+</section>
+<section id="privacyEn" lang="en" hidden>
+<h1>Privacy Policy</h1>
+<p><small>Stability Guard for ChatGPT · Last updated August 15, 2026</small></p>
+<p class="note">Stability Guard for ChatGPT is an independent, unofficial extension and is not created by, endorsed by, or affiliated with OpenAI.</p>
+<h2>Data handled by the extension</h2><h3>Website content on chatgpt.com</h3>
+<p>The extension locally reads the rendered DOM on <code>chatgpt.com</code> to identify Thinking displays, tool traces, embedded tool UI, placeholders, code/log blocks, and related UI. Because this DOM can appear near or inside conversations, the processed content may include user-generated content or personal communications.</p>
+<p>This content is processed only in the browser for the extension's purpose of reducing rendering overhead and hiding or deferring selected ChatGPT UI elements. Conversation content is not persistently stored by the extension and is not transmitted to the developer or to third parties.</p>
+<h3>Local settings</h3><p>Only extension settings, consent version, consent timestamp, and UI language preference are stored in <code>chrome.storage.local</code>. These values are not transmitted to a developer-operated server.</p>
+<h2>Network activity</h2><p>The extension has no analytics, advertising, telemetry, remote configuration, account system, or developer-operated backend, and it does not initiate external network requests.</p>
+<h2>Sharing and sale</h2><p>The extension does not sell, share, or transfer user data to third parties.</p>
+<h2>Retention, consent, and deletion</h2><p>Website content is processed transiently in the active page and is not retained by the extension. Local settings remain in the browser profile until changed, cleared, or the extension is removed. Consent for local page processing can be revoked from the extension popup. When a ChatGPT tab can be detected, that tab is reloaded so DOM processing stops under the revoked consent state.</p>
+<h2>Permissions</h2><p>The <code>storage</code> permission is used for local settings. Content scripts are limited to <code>https://chatgpt.com/*</code>.</p>
+<h2>Compatibility</h2><p>The extension is built against the current ChatGPT web UI. ChatGPT DOM/UI changes can temporarily break detection or hiding until the extension is updated.</p>
+<h2>Contact</h2><p>For privacy questions, use the developer contact method shown on the extension's store listing.</p>
+</section>
+<script src="privacy.js"></script>
 </body></html>

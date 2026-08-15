@@ -1,0 +1,5 @@
+{
+  "extensionName": { "message": "Stability Guard for ChatGPT" },
+  "extensionDescription": { "message": "Reduces rendering churn in long ChatGPT chats. Built for the current ChatGPT web UI; site updates may require an extension update." },
+  "actionTitle": { "message": "Stability Guard for ChatGPT" }
+}
