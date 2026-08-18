@@ -10,6 +10,15 @@
 
     const marked = new Set();
     const partsByBlock = new WeakMap();
+    const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const ACTIONABLE_UI_SELECTOR = [
+      'a[href]', 'button', 'input:not([type="hidden"])', 'select', 'textarea', 'summary',
+      '[contenteditable]:not([contenteditable="false"])', '[role="button"]', '[role="link"]',
+      '[role="checkbox"]', '[role="switch"]', '[role="menuitem"]', '[role="menuitemcheckbox"]',
+      '[role="menuitemradio"]', '[role="combobox"]', '[role="slider"]', '[role="spinbutton"]',
+      '[role="radio"]', '[role="tab"]', '[role="treeitem"]', '[role="option"]', '[role="dialog"]',
+      '[aria-modal="true"]', '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
     let active = false;
     let observing = false;
 
@@ -29,6 +38,11 @@
 
     function normalize(value) {
       return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function hasActionableUi(element) {
+      return element instanceof Element &&
+        (element.matches(ACTIONABLE_UI_SELECTOR) || Boolean(element.querySelector(ACTIONABLE_UI_SELECTOR)));
     }
 
     function isConversationRoute() {
@@ -82,7 +96,7 @@
 
     function getParts(block) {
       if (!(block instanceof Element) || !block.classList.contains('no-scrollbar')) return null;
-      if (block.closest('.markdown')) return null;
+      if (!block.closest(TURN_SELECTOR) || block.closest('.markdown')) return null;
       const stack = block.parentElement;
       if (!(stack instanceof Element) || !stack.classList.contains('grow')) return null;
       if (!stack.classList.contains('flex') || !stack.classList.contains('flex-col')) return null;
@@ -97,6 +111,9 @@
       if (!getParts(block)) return false;
       if (block.classList.contains('csg-tool-embed')) return false;
       if (normalize(block.textContent)) return false;
+      // A text-empty auth/action card can still contain icon buttons or custom
+      // controls. Those are live UI, not loading placeholders.
+      if (hasActionableUi(block)) return false;
       return !block.querySelector('pre,code,img,picture,canvas,video,svg,iframe,table,audio,object,embed');
     }
 
@@ -128,7 +145,9 @@
         if (old?.header !== parts.header || old?.divider !== parts.divider) clearParts(old);
       }
       block.classList.add('csg-prehide-tool-block');
-      parts.header.classList.add('csg-prehide-tool-block');
+      // Keep any live header controls visible even while the empty output body
+      // is pre-hidden. A connector can surface auth/Connect actions here first.
+      parts.header.classList.toggle('csg-prehide-tool-block', !hasActionableUi(parts.header));
       if (parts.divider?.classList.contains('h-px')) parts.divider.classList.add('csg-prehide-tool-block');
       marked.add(block);
       partsByBlock.set(block, parts);
@@ -139,6 +158,15 @@
       if (!(node instanceof Element)) return;
       if (node.matches('.no-scrollbar')) mark(node);
       node.querySelectorAll?.('.no-scrollbar').forEach(mark);
+    }
+
+    function placeholderBlockFor(element) {
+      if (!(element instanceof Element)) return null;
+      const direct = element.closest('.no-scrollbar');
+      if (direct) return direct;
+      const header = element.closest('.mt-2');
+      const sibling = header?.nextElementSibling;
+      return sibling?.classList.contains('no-scrollbar') ? sibling : null;
     }
 
     function clearAll() {
@@ -160,7 +188,7 @@
         for (const node of mutation.removedNodes) cleanupRemoved(node);
         const targetElement = mutation.target instanceof Element
           ? mutation.target : mutation.target.parentElement;
-        const block = targetElement?.closest?.('.no-scrollbar');
+        const block = placeholderBlockFor(targetElement);
         if (block) mark(block);
       }
     });
@@ -168,7 +196,13 @@
     function startObserving() {
       if (observing) return;
       observing = true;
-      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['href', 'tabindex', 'role', 'contenteditable', 'type', 'aria-modal', 'aria-label', 'title']
+      });
     }
 
     updateCount();

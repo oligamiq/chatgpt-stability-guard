@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.11 — 2026-08-18
+
+- Fixed Stability Guard interfering with ChatGPT connector/plugin Connect, Add, authentication, and Library controls.
+- Scoped tool/reasoning optimizations to conversation content and made interactive rich UI fail open, including controls that appear dynamically.
+- Added regression coverage for dynamic links, ARIA controls, placeholder headers, embedded tool cards, and attribute-only UI transitions.
+- Replaced global embedded-tool rescans with localized reconciliation to preserve performance in long conversations.
+
 ## 1.0.10 — 2026-08-15
 
 - Added complete Japanese/English extension UI support with automatic browser-language selection.

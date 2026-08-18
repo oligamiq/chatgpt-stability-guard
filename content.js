@@ -54,7 +54,6 @@
       scheduled: false,
       freezeTimer: 0,
       toolCleanupTimer: 0,
-      embeddedScanTimer: 0,
       detachedCleanupTimer: 0,
       stats: { thinking: 0, tools: 0, frozen: 0, scans: 0 }
     };
@@ -72,7 +71,9 @@
     }
 
     const THINK_KEYS = ['think', 'thinking', 'thought', 'reason', 'reasoning'];
-    const TOOL_KEYS = ['tool', 'mcp', 'connector'];
+    // "connector" is also used by ChatGPT's first-party connector/plugin UI.
+    // Treating it as a generic tool-trace token can mutate real Connect/Add controls.
+    const TOOL_KEYS = ['tool', 'mcp'];
 
     const idle = (fn) => {
       if ('requestIdleCallback' in window) requestIdleCallback(fn, { timeout: 450 });
@@ -102,6 +103,54 @@
     }
 
     const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const SEMANTIC_ACTION_SELECTOR = [
+      'a[href]', 'button', 'input:not([type="hidden"])', 'select', 'textarea', 'summary',
+      '[contenteditable]:not([contenteditable="false"])', '[role="button"]', '[role="link"]',
+      '[role="checkbox"]', '[role="switch"]', '[role="menuitem"]', '[role="menuitemcheckbox"]',
+      '[role="menuitemradio"]', '[role="combobox"]', '[role="slider"]', '[role="spinbutton"]',
+      '[role="radio"]', '[role="tab"]', '[role="treeitem"]', '[role="option"]', '[role="dialog"]',
+      '[aria-modal="true"]'
+    ].join(',');
+    const ACTIONABLE_UI_SELECTOR = `${SEMANTIC_ACTION_SELECTOR},[tabindex]:not([tabindex="-1"])`;
+
+    function isConversationTurnScoped(el) {
+      return el instanceof Element && Boolean(el.closest(TURN_SELECTOR));
+    }
+
+    function isPassiveToolDisclosure(control) {
+      if (!(control instanceof Element)) return false;
+      if (control.matches('summary')) return true;
+      const label = normalizeLabel(control.textContent);
+      return label.length <= 180 && (isToolSummaryLabel(label) || isConfigLabel(label));
+    }
+
+    const ACTION_LINK_LABEL_RE = /(?:\b(?:connect|authori[sz]e|authenticate|sign\s*in|log\s*in|continue|allow|grant|enable|add(?:\s+(?:account|app|connector|plugin|source|library))?)\b|接続|認証|ログイン|追加|許可|連携)/i;
+
+    function hasActionableUi(element, allowPassiveTraceControls = false) {
+      if (!(element instanceof Element)) return false;
+      const controls = [];
+      if (element.matches(ACTIONABLE_UI_SELECTOR)) controls.push(element);
+      controls.push(...element.querySelectorAll(ACTIONABLE_UI_SELECTOR));
+      return controls.some((control) => {
+        if (!allowPassiveTraceControls) return true;
+        // Normal assistant output can legitimately contain links, focus-only
+        // scroll containers and copy controls. Ignore those narrow cases, but
+        // action-looking auth/connect links must fail open even in markdown.
+        if (control.closest('pre, code')) return false;
+        const label = normalizeLabel(control.getAttribute('aria-label') || control.getAttribute('title') || control.textContent);
+        if (control.matches('a[href]') && control.closest('.markdown')) {
+          const buttonLike = control.getAttribute('role') === 'button' || ACTION_LINK_LABEL_RE.test(label);
+          if (!buttonLike) return false;
+        }
+        if (control.closest('.markdown') && control.hasAttribute('tabindex') &&
+            !control.matches(SEMANTIC_ACTION_SELECTOR)) {
+          return false;
+        }
+        if (control.closest('.markdown') && /^(copy|copy code|コピー|コードをコピー)$/i.test(label)) return false;
+        return !isPassiveToolDisclosure(control);
+      });
+    }
+
     function turnId(turn) {
       return turn instanceof Element ? (turn.getAttribute('data-testid') || '') : '';
     }
@@ -358,17 +407,21 @@
 
     function analyzeElement(el) {
       if (!(el instanceof Element)) return null;
+      const inTurn = isConversationTurnScoped(el);
       const testId = el.getAttribute('data-testid') || '';
-      const isThinking = hasKey(testId, THINK_KEYS);
-      const isTool = hasKey(testId, TOOL_KEYS);
+      const hasAppAction = inTurn && hasActionableUi(el, true);
+      // Interactive rich UI must fail open. Thinking/tool traces are optimization
+      // targets; Connect/Add/auth controls are application UI and stay untouched.
+      const isThinking = inTurn && hasKey(testId, THINK_KEYS) && !hasAppAction;
+      const isTool = inTurn && hasKey(testId, TOOL_KEYS) && !hasAppAction;
       const isTrace = isThinking || isTool;
       const traceChildren = [...el.children].filter((child) => child.classList.contains('csg-trace-body'));
       let traceBody = null;
       if (isTrace && el.children.length > 1) {
         const body = el.lastElementChild;
-        if (body && !body.matches('button,[role="button"],summary')) traceBody = body;
+        if (body && !hasActionableUi(body, true)) traceBody = body;
       }
-      const isHeavy = state.settings.lazyHeavyBlocks &&
+      const isHeavy = inTurn && state.settings.lazyHeavyBlocks &&
         (el.matches('pre') || hasKey(testId, ['code']));
       return { el, isThinking, isTool, isHeavy, traceChildren, traceBody };
     }
@@ -391,6 +444,19 @@
       if (!shell.matches('[class~="group/tool-message"]')) observeToolMarker(marker);
     }
 
+    function unmarkToolChrome(shell) {
+      if (!(shell instanceof Element)) return;
+      shell.classList.remove('csg-tool-ui');
+      state.textToolShells.delete(shell);
+      state.toolShellMarkers.delete(shell);
+    }
+
+    function isPassiveStructuralToolShell(shell) {
+      return isConversationTurnScoped(shell) &&
+        shell.matches('[class~="group/tool-message"]') &&
+        !hasActionableUi(shell, true);
+    }
+
     function findToolSummaryShell(marker) {
       return marker.closest('[class~="group/tool-message"]') ||
         marker.closest('details') || marker;
@@ -398,11 +464,17 @@
 
     function getEmbeddedToolParts(block) {
       if (!(block instanceof Element) || !block.classList.contains('no-scrollbar')) return null;
-      if (!block.closest('.agent-turn')) return null;
+      if (!isConversationTurnScoped(block) || !block.closest('.agent-turn')) return null;
+      // Rich tool/app cards can contain authentication, Connect, Add, links, or
+      // other controls. Never hide those as a passive embed.
+      if (hasActionableUi(block)) return null;
       const header = block.previousElementSibling;
       if (!(header instanceof Element)) return null;
       const trigger = header.querySelector('[role="button"]');
       if (!(trigger instanceof Element)) return null;
+      const extraHeaderAction = [...header.querySelectorAll(ACTIONABLE_UI_SELECTOR)]
+        .some((control) => control !== trigger && !trigger.contains(control));
+      if (extraHeaderAction) return null;
       const icon = trigger.querySelector(':scope > img[alt]');
       const nestedButton = trigger.querySelector(':scope > button');
       if (!(icon instanceof HTMLImageElement) || !(nestedButton instanceof HTMLButtonElement)) return null;
@@ -412,9 +484,26 @@
       return { header, divider: block.nextElementSibling };
     }
 
-    function markEmbeddedToolBlock(block) {
+    function clearEmbeddedToolBlock(block, parts = state.embeddedToolBlocks.get(block)) {
+      if (!(block instanceof Element)) return;
+      block.classList.remove('csg-tool-embed');
+      parts?.header?.classList.remove('csg-tool-embed');
+      parts?.divider?.classList.remove('csg-tool-embed');
+      state.embeddedToolBlocks.delete(block);
+    }
+
+    function reconcileEmbeddedToolBlock(block) {
+      if (!(block instanceof Element)) return;
+      const oldParts = state.embeddedToolBlocks.get(block);
       const parts = getEmbeddedToolParts(block);
-      if (!parts) return;
+      if (!parts) {
+        if (oldParts || block.classList.contains('csg-tool-embed')) clearEmbeddedToolBlock(block, oldParts);
+        return;
+      }
+      if (oldParts && (oldParts.header !== parts.header || oldParts.divider !== parts.divider)) {
+        oldParts.header?.classList.remove('csg-tool-embed');
+        oldParts.divider?.classList.remove('csg-tool-embed');
+      }
       block.classList.add('csg-tool-embed');
       parts.header.classList.add('csg-tool-embed');
       if (parts.divider?.classList.contains('h-px')) parts.divider.classList.add('csg-tool-embed');
@@ -422,49 +511,56 @@
     }
 
     function cleanupEmbeddedToolBlocks() {
-      for (const [block, parts] of state.embeddedToolBlocks) {
-        if (block.isConnected && getEmbeddedToolParts(block)) continue;
-        block.classList.remove('csg-tool-embed');
-        parts.header?.classList.remove('csg-tool-embed');
-        parts.divider?.classList.remove('csg-tool-embed');
-        state.embeddedToolBlocks.delete(block);
+      for (const [block] of [...state.embeddedToolBlocks]) {
+        if (!block.isConnected || !getEmbeddedToolParts(block)) clearEmbeddedToolBlock(block);
       }
     }
 
-    function scanEmbeddedToolBlocks() {
-      state.embeddedScanTimer = 0;
-      if (!state.settings.enabled || !state.settings.hideToolEmbeds) return;
-      document.querySelectorAll('.agent-turn .no-scrollbar').forEach(markEmbeddedToolBlock);
-      cleanupEmbeddedToolBlocks();
-      updateStatus();
-    }
-
-    function scheduleEmbeddedToolScan() {
-      if (state.embeddedScanTimer || !state.settings.enabled || !state.settings.hideToolEmbeds) return;
-      state.embeddedScanTimer = setTimeout(scanEmbeddedToolBlocks, 180);
+    function embeddedToolCandidatesFor(scanRoot) {
+      const blocks = new Set();
+      const add = (candidate) => {
+        if (candidate instanceof Element && candidate.matches('.no-scrollbar')) blocks.add(candidate);
+      };
+      add(scanRoot);
+      add(scanRoot.closest?.('.no-scrollbar'));
+      scanRoot.querySelectorAll?.('.no-scrollbar').forEach(add);
+      const nearby = [scanRoot, scanRoot.closest?.('.mt-2'), scanRoot.closest?.('.csg-tool-embed')];
+      for (const node of nearby) {
+        if (!(node instanceof Element)) continue;
+        add(node.previousElementSibling);
+        add(node.nextElementSibling);
+      }
+      return [...blocks];
     }
 
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';
 
     function classifyToolChromeCandidate(el) {
-      if (!(el instanceof Element) || el.closest('.markdown')) return;
+      if (!(el instanceof Element) || el.closest('.markdown') || !isConversationTurnScoped(el)) return;
       const structuralShell = el.closest('[class~="group/tool-message"]');
       if (structuralShell) {
-        markToolChrome(structuralShell, el);
+        if (isPassiveStructuralToolShell(structuralShell)) markToolChrome(structuralShell, el);
+        else unmarkToolChrome(structuralShell);
         return;
       }
       const label = normalizeLabel(el.textContent);
       if (!label || label.length > 180) return;
-      if (isToolSummaryLabel(label)) markToolChrome(findToolSummaryShell(el), el);
-      else if (isConfigLabel(label)) markToolChrome(el, el);
+      if (isToolSummaryLabel(label)) {
+        const shell = findToolSummaryShell(el);
+        if (hasActionableUi(shell, true)) unmarkToolChrome(shell);
+        else markToolChrome(shell, el);
+      } else if (isConfigLabel(label)) markToolChrome(el, el);
     }
 
     function shellHasToolLabel(shell) {
       const marker = state.toolShellMarkers.get(shell);
       if (!(marker instanceof Element) || !marker.isConnected || !shell.contains(marker)) return false;
-      if (shell.matches('[class~="group/tool-message"]')) return true;
+      if (shell.matches('[class~="group/tool-message"]')) return isPassiveStructuralToolShell(shell);
+      if (!isConversationTurnScoped(shell)) return false;
       const label = normalizeLabel(marker.textContent);
-      return label.length <= 180 && (isToolSummaryLabel(label) || isConfigLabel(label));
+      if (label.length > 180) return false;
+      if (isToolSummaryLabel(label)) return !hasActionableUi(shell, true);
+      return isConfigLabel(label);
     }
 
     // The document-level observer already sees text/child changes for connected
@@ -506,20 +602,27 @@
           ))
         : [];
       const turnStructureChanged = uniqueCandidates.some((el) => el.matches(TURN_SELECTOR));
-      const traceParent = scanRoot.closest('.csg-thinking, .csg-tool');
-      const rootIsNestedTrace = Boolean(traceParent && traceParent !== scanRoot);
-      const toolCandidates = state.settings.enabled && state.settings.hideToolSummary
+      const scanHasTurn = isConversationTurnScoped(scanRoot) || Boolean(scanRoot.querySelector(TURN_SELECTOR));
+      const embeddedToolCandidates = state.settings.enabled && state.settings.hideToolEmbeds && scanHasTurn
+        ? embeddedToolCandidatesFor(scanRoot)
+        : [];
+      const toolCandidates = state.settings.enabled && state.settings.hideToolSummary && scanHasTurn
         ? [scanRoot, ...scanRoot.querySelectorAll(TOOL_CHROME_CANDIDATES)]
             .filter((el, index, list) => el.matches(TOOL_CHROME_CANDIDATES) && list.indexOf(el) === index)
         : [];
       const existingTraceBodies = [...scanRoot.querySelectorAll('.csg-trace-body')];
 
-      // Write phase.
-      scanRoot.classList.toggle('csg-trace-body', rootIsNestedTrace);
+      // Write phase. Trace-body containment is assigned only by analysis of the
+      // trace container itself. Never stamp arbitrary streamed descendants.
+      if (scanRoot.classList.contains('csg-trace-body') &&
+          !scanRoot.parentElement?.matches('.csg-thinking, .csg-tool')) {
+        scanRoot.classList.remove('csg-trace-body');
+      }
       for (const plan of plans) applyElementAnalysis(plan);
       for (const el of existingTraceBodies) {
-        if (!el.closest('.csg-thinking, .csg-tool')) el.classList.remove('csg-trace-body');
+        if (!el.parentElement?.matches('.csg-thinking, .csg-tool')) el.classList.remove('csg-trace-body');
       }
+      for (const block of embeddedToolCandidates) reconcileEmbeddedToolBlock(block);
       for (const candidate of toolCandidates) classifyToolChromeCandidate(candidate);
       scanOldAppErrors(oldAppErrorCandidates, turnStructureChanged);
     }
@@ -564,7 +667,6 @@
         });
         roots.forEach(scanRoot);
         if (state.textToolShells.size) cleanupToolChrome();
-        scheduleEmbeddedToolScan();
         updateStatus();
         scheduleFreeze();
         if (state.pendingRoots.size) scheduleScan();
@@ -631,8 +733,6 @@
         state.toolShellMarkers.clear();
       }
       if (!state.settings.enabled || !state.settings.hideToolEmbeds) {
-        clearTimeout(state.embeddedScanTimer);
-        state.embeddedScanTimer = 0;
         for (const [block, parts] of state.embeddedToolBlocks) {
           block.classList.remove('csg-tool-embed');
           parts.header?.classList.remove('csg-tool-embed');
@@ -724,18 +824,25 @@
       let removed = false;
       for (const mutation of mutations) {
         if (mutation.type === 'attributes') {
-          scheduleScan(mutation.target);
+          const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+          const classified = target?.closest?.('.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-embed');
+          scheduleScan(classified || target);
           continue;
         }
         if (mutation.type === 'characterData') {
+          const parent = mutation.target.parentElement;
+          const classified = parent?.closest?.('.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-embed');
+          if (classified) scheduleScan(classified);
           if (state.settings.hideToolSummary) {
-            const parent = mutation.target.parentElement;
             const candidate = parent?.closest?.(TOOL_CHROME_CANDIDATES);
             if (candidate && !candidate.closest('.markdown')) scheduleScan(candidate);
           }
           continue;
         }
         if (state.oldAppRoutePending) noteOldAppRouteStructureChange();
+        const mutationTarget = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+        const classifiedShell = mutationTarget?.closest?.('.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-embed');
+        if (classifiedShell) scheduleScan(classifiedShell);
         for (const node of mutation.addedNodes) {
           if (node instanceof Element) scheduleScan(node);
         }
@@ -775,7 +882,10 @@
         subtree: true,
         characterData: true,
         attributes: true,
-        attributeFilter: ['data-testid']
+        attributeFilter: [
+          'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
+          'aria-modal', 'aria-label', 'title'
+        ]
       });
     });
 

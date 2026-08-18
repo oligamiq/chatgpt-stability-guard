@@ -1540,10 +1540,11 @@
     if (!(target instanceof Element)) return false;
     return Boolean(target.closest(
       'input,textarea,select,button,a[href],summary,[contenteditable="true"],' +
-      '[role="textbox"],[role="button"],[role="checkbox"],[role="switch"],' +
+      '[role="textbox"],[role="button"],[role="link"],[role="checkbox"],[role="switch"],' +
       '[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],' +
       '[role="combobox"],[role="slider"],[role="spinbutton"],[role="radio"],' +
-      '[role="tab"],[role="treeitem"],[role="option"]'
+      '[role="tab"],[role="treeitem"],[role="option"],[role="dialog"],[aria-modal="true"],' +
+      '[tabindex]:not([tabindex="-1"])'
     ));
   }
 

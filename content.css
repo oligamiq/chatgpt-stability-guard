@@ -2,7 +2,7 @@ html.csg-reduce-motion {
   scroll-behavior: auto !important;
 }
 
-html.csg-reduce-motion :where(
+html.csg-reduce-motion [data-testid^="conversation-turn-"] :where(
   [class*="animate-"],
   [class*="transition-"],
   [role="progressbar"],
@@ -64,7 +64,7 @@ html.csg-show-recent-only .csg-recent-scrollhost::-webkit-scrollbar {
 #csg-recent-scrollbar-thumb:active { cursor: grabbing; }
 #csg-recent-scrollbar-thumb[hidden] { display: none !important; }
 
-html.csg-lazy-heavy pre,
+html.csg-lazy-heavy [data-testid^="conversation-turn-"] pre,
 html.csg-lazy-heavy .csg-heavy {
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;
