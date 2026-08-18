@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.13 — 2026-08-19
+
+- Fixed live App/Tool protection when turns age out, rewind, or React reuses an existing conversation-turn DOM node.
+- Kept App template error and Retry UI interactive throughout the latest two turns, then safely hid stale errors afterward.
+- Added a persistent priority queue for live-boundary rescans so heavy streaming cannot starve protection-state transitions.
+- Protected the actual two DOM-tail turns as well as the newest numeric turns, including stale high-number branch/outlier DOM cases.
+- Expanded regression coverage for append/remove transitions, reused `data-testid` values, stale numeric outliers, and Retry visibility.
+
 ## 1.0.12 — 2026-08-18
 
 - Prevented Stability Guard from hiding or lazy-rendering the newest ChatGPT app/tool turns while their templates and UI are still bootstrapping.

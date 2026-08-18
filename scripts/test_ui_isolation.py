@@ -104,6 +104,7 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
 </section>
 <section data-testid="conversation-turn-3" data-turn="assistant">
   <div class="agent-turn">
+    <div id="reuse-passive-tool" data-testid="tool-reuse"><div>Reusable passive tool</div><div>trace</div></div>
     <div class="grow flex flex-col">
       <div id="placeholder-passive-header" class="mt-2">Loading tool</div>
       <div id="placeholder-passive" class="no-scrollbar"></div><div class="h-px"></div>
@@ -133,6 +134,9 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
       <div id="dynamic-placeholder" class="no-scrollbar"><a id="dynamic-placeholder-connect" aria-label="Connect" style="display:block;width:20px;height:20px"></a></div><div class="h-px"></div>
     </div>
   </div>
+</section>
+<section id="stale-high-turn" data-testid="conversation-turn-99" data-turn="assistant">
+  <div class="agent-turn">stale high numeric branch outlier</div>
 </section>
 <section data-testid="conversation-turn-7" data-turn="assistant">
   <div class="agent-turn">
@@ -168,7 +172,7 @@ window.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:{{ge
 <script>
 window.__clicks={{}};
 const ACTION_IDS=['connector','library','inner-connect','auth-link','aria-switch','thinking-connect','shell-connect','details-connect','embed-connect',
-  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect','live-retry'];
+  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect'];
 function registerAction(id) {{
   const el=document.getElementById(id);
   if (!el || el.dataset.csgTestBound==='1') return;
@@ -176,6 +180,7 @@ function registerAction(id) {{
   el.addEventListener('click', () => {{ window.__clicks[id]=(window.__clicks[id]||0)+1; }});
 }}
 for (const id of ACTION_IDS) registerAction(id);
+registerAction('live-retry');
 function snapshot(id) {{
   const el=document.getElementById(id);
   const style=getComputedStyle(el);
@@ -223,6 +228,62 @@ setTimeout(() => {{
   for (const id of ACTION_IDS) registerAction(id);
 }}, 300);
 setTimeout(() => {{
+  const motion=snapshot('live-app-motion');
+  window.__liveBeforeAge={{
+    tool:physicallyRendered('live-tool'),
+    shell:physicallyRendered('live-shell'),
+    embed:physicallyRendered('live-embed'),
+    placeholder:physicallyRendered('live-placeholder'),
+    recentPlaceholder:physicallyRendered('dynamic-header-placeholder-body'),
+    error:physicallyRendered('live-app-error'),
+    motion:physicallyRendered('live-app-motion') && motion.transitionDuration==='2s' && motion.animationDuration==='2s',
+    retryHit:hitClick('live-retry')
+  }};
+}}, 500);
+setTimeout(() => {{
+  document.body.insertAdjacentHTML('beforeend','<section data-testid="conversation-turn-9" data-turn="assistant"><div class="agent-turn">next assistant turn</div></section>');
+}}, 650);
+setTimeout(() => {{
+  window.__oneStepProtected={{
+    error:!snapshot('live-app-error').classes.includes('csg-old-app-load-error') && physicallyRendered('live-app-error'),
+    retry:physicallyRendered('live-retry')
+  }};
+}}, 1250);
+setTimeout(() => {{
+  document.body.insertAdjacentHTML('beforeend','<section data-testid="conversation-turn-10" data-turn="assistant"><div class="agent-turn">newest assistant turn</div></section>');
+}}, 1350);
+setTimeout(() => {{
+  const motion=snapshot('live-app-motion');
+  window.__agedOut={{
+    recentPlaceholder:snapshot('dynamic-header-placeholder-body').classes.includes('csg-prehide-tool-block'),
+    tool:snapshot('live-tool').classes.includes('csg-tool'),
+    shell:snapshot('live-shell').classes.includes('csg-tool-ui'),
+    embed:snapshot('live-embed').classes.includes('csg-tool-embed'),
+    placeholder:snapshot('live-placeholder').classes.includes('csg-prehide-tool-block'),
+    error:snapshot('live-app-error').classes.includes('csg-old-app-load-error'),
+    motion:motion.transitionDuration!=='2s' && motion.animationDuration!=='2s'
+  }};
+}}, 2000);
+setTimeout(() => {{
+  document.querySelector('[data-testid="conversation-turn-10"]')?.remove();
+  document.querySelector('[data-testid="conversation-turn-9"]')?.remove();
+}}, 2150);
+setTimeout(() => {{
+  const turn3=document.querySelector('[data-testid="conversation-turn-3"]');
+  if (turn3) turn3.setAttribute('data-testid','conversation-turn-100');
+}}, 2800);
+setTimeout(() => {{
+  window.__attributeReuseLive={{
+    tool:!snapshot('reuse-passive-tool').classes.includes('csg-tool') && snapshot('reuse-passive-tool').display!=='none',
+    placeholder:!snapshot('placeholder-passive').classes.includes('csg-prehide-tool-block') && snapshot('placeholder-passive').display!=='none',
+    actualTailStillLive:physicallyRendered('live-tool') && physicallyRendered('live-app-error')
+  }};
+}}, 3450);
+setTimeout(() => {{
+  const turn100=document.querySelector('[data-testid="conversation-turn-100"]');
+  if (turn100) turn100.setAttribute('data-testid','conversation-turn-3');
+}}, 3600);
+setTimeout(() => {{
   const hit={{}};
   for (const id of ACTION_IDS) hit[id]=hitClick(id);
   const states={{}};
@@ -230,7 +291,7 @@ setTimeout(() => {{
     'tool-with-aria-action','dynamic-input-tool','passive-thinking','interactive-thinking','dynamic-tool','passive-shell','interactive-shell','passive-details',
     'interactive-details','dynamic-details','embed-passive','embed-action','embed-dynamic','embed-text-dynamic','placeholder-passive',
     'placeholder-action','placeholder-header-action','placeholder-header-body','dynamic-placeholder','dynamic-header-placeholder-header',
-    'dynamic-header-placeholder-body','live-tool','live-shell','live-embed','live-placeholder','live-app-error','live-app-motion',
+    'dynamic-header-placeholder-body','reuse-passive-tool','live-tool','live-shell','live-embed','live-placeholder','live-app-error','live-app-motion',
     'inside-motion','streamed-fragment','inside-pre']) {{
     states[id]=snapshot(id);
   }}
@@ -263,25 +324,34 @@ setTimeout(() => {{
     placeholderHeaderBodyHidden: states['placeholder-header-body'].classes.includes('csg-prehide-tool-block') && states['placeholder-header-body'].display==='none',
     dynamicPlaceholderReleased: !states['dynamic-placeholder'].classes.includes('csg-prehide-tool-block') && states['dynamic-placeholder'].display!=='none',
     dynamicHeaderActionVisible: !states['dynamic-header-placeholder-header'].classes.includes('csg-prehide-tool-block') && states['dynamic-header-placeholder-header'].display!=='none',
-    recentHeaderBodyProtected: !states['dynamic-header-placeholder-body'].classes.includes('csg-prehide-tool-block') && physicallyRendered('dynamic-header-placeholder-body'),
-    liveToolVisible: !states['live-tool'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-tool'),
-    liveShellVisible: !states['live-shell'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-shell'),
-    liveEmbedVisible: !states['live-embed'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-embed'),
-    livePlaceholderVisible: !states['live-placeholder'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-placeholder'),
-    liveAppErrorVisible: !states['live-app-error'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-app-error'),
-    liveAppMotionNative: states['live-app-motion'].transitionDuration==='2s' && states['live-app-motion'].animationDuration==='2s' && physicallyRendered('live-app-motion'),
+    liveProtectionInitiallyPreserved: Object.values(window.__liveBeforeAge || {{}}).every(Boolean) && window.__clicks['live-retry']===1,
+    oneStepRetryProtected: Object.values(window.__oneStepProtected || {{}}).every(Boolean),
+    agedOutTransitionApplied: Object.values(window.__agedOut || {{}}).every(Boolean),
+    attributeReuseTransitionApplied: Object.values(window.__attributeReuseLive || {{}}).every(Boolean) &&
+      states['reuse-passive-tool'].classes.includes('csg-tool') && states['reuse-passive-tool'].display==='none' &&
+      states['placeholder-passive'].classes.includes('csg-prehide-tool-block') && states['placeholder-passive'].display==='none',
+    staleHighNumericTailProtected: physicallyRendered('live-tool') && physicallyRendered('live-app-error'),
+    rewindHeaderBodyProtected: !states['dynamic-header-placeholder-body'].classes.includes('csg-prehide-tool-block') && physicallyRendered('dynamic-header-placeholder-body'),
+    rewindLiveToolVisible: !states['live-tool'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-tool'),
+    rewindLiveShellVisible: !states['live-shell'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-shell'),
+    rewindLiveEmbedVisible: !states['live-embed'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-embed'),
+    rewindLivePlaceholderVisible: !states['live-placeholder'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-placeholder'),
+    rewindLiveAppErrorVisible: !states['live-app-error'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-app-error'),
+    rewindLiveMotionNative: states['live-app-motion'].transitionDuration==='2s' && states['live-app-motion'].animationDuration==='2s' && physicallyRendered('live-app-motion'),
     streamedFragmentNotContained: !states['streamed-fragment'].classes.includes('csg-trace-body') && states['streamed-fragment'].contentVisibility!=='auto',
     insideMotionReduced: states['inside-motion'].transitionDuration!=='2s',
     insidePreLazy: states['inside-pre'].contentVisibility==='auto',
     allActionHit: Object.values(hit).every(Boolean),
     allActionsClicked: ACTION_IDS.every(id => window.__clicks[id]===1),
-    states, hit, clicks:window.__clicks
+    states, hit, clicks:window.__clicks, liveBeforeAge:window.__liveBeforeAge,
+    oneStepProtected:window.__oneStepProtected, agedOut:window.__agedOut,
+    attributeReuseLive:window.__attributeReuseLive
   }};
   const out=document.createElement('pre');
   out.id='csg-test-result';
   out.textContent=JSON.stringify(result);
   document.body.appendChild(out);
-}}, 1200);
+}}, 4300);
 </script></body></html>'''
 
 
@@ -292,18 +362,19 @@ def main():
         target.write_text(page, encoding='utf-8')
         proc = subprocess.run([
             CHROME, '--headless=new', '--no-sandbox', '--disable-gpu',
-            '--virtual-time-budget=2600', '--dump-dom', target.as_uri(),
+            '--virtual-time-budget=5000', '--dump-dom', target.as_uri(),
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20)
     match = re.search(r'<pre id="csg-test-result"[^>]*>(.*?)</pre>', proc.stdout, re.S)
     if not match:
         raise AssertionError(f'no result\nSTDERR:\n{proc.stderr[-2000:]}\nDOM:\n{proc.stdout[-5000:]}')
     payload = json.loads(html.unescape(match.group(1)))
-    detail_keys = {'states', 'hit', 'clicks'}
+    detail_keys = {'states', 'hit', 'clicks', 'liveBeforeAge', 'oneStepProtected', 'agedOut', 'attributeReuseLive'}
     failures = {k: v for k, v in payload.items() if k not in detail_keys and v is not True}
     if failures:
         raise AssertionError(
             f'UI isolation failures: {failures}\n'
             f'states={json.dumps(payload.get("states"), ensure_ascii=False, indent=2)}\n'
+            f'liveBeforeAge={payload.get("liveBeforeAge")} agedOut={payload.get("agedOut")}\n'
             f'hit={payload.get("hit")} clicks={payload.get("clicks")}'
         )
     print('PASS ui-isolation: application Connect/Add controls remain interactive')

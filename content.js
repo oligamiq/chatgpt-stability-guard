@@ -37,6 +37,7 @@
       settings: { ...DEFAULTS },
       uiLanguage: ['ja', 'en'].includes(uiLanguage) ? uiLanguage : (String(navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en'),
       pendingRoots: new Set(),
+      liveBoundaryRoots: new Set(),
       textToolShells: new Set(),
       toolShellMarkers: new Map(),
       embeddedToolBlocks: new Map(),
@@ -51,6 +52,7 @@
       oldAppRoutePreviousTurns: new Map(),
       oldAppStableTurns: new Map(),
       latestTurnIndex: -1,
+      liveProtectedTurns: new Set(),
       scheduled: false,
       freezeTimer: 0,
       toolCleanupTimer: 0,
@@ -180,13 +182,36 @@
       return latest;
     }
 
-    function isProtectedLiveToolTurn(element, latestIndex = mountedLatestTurnIndex()) {
+    function computeLiveProtectedTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+      const protectedTurns = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
+      for (const turn of turns) {
+        const index = turnIndexFromId(turnId(turn));
+        if (index < 0 || latestIndex < 0 || index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1)) {
+          protectedTurns.add(turn);
+        }
+      }
+      return protectedTurns;
+    }
+
+    function isProtectedLiveToolTurn(element, latestIndex = mountedLatestTurnIndex(), protectedTurns = state.liveProtectedTurns) {
       if (!(element instanceof Element)) return true;
       const turn = element.closest(TURN_SELECTOR);
       if (!(turn instanceof Element)) return true;
+      if (protectedTurns?.has(turn)) return true;
       const index = turnIndexFromId(turnId(turn));
       if (index < 0 || latestIndex < 0) return true;
       return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
+    }
+
+    function queueLiveProtectionBoundaryChanges(latestTurnIndex) {
+      const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+      const nextProtectedTurns = computeLiveProtectedTurns(latestTurnIndex, turns);
+      const changedTurns = turns.filter((turn) =>
+        state.liveProtectedTurns.has(turn) !== nextProtectedTurns.has(turn)
+      );
+      state.liveProtectedTurns = nextProtectedTurns;
+      for (const turn of changedTurns) state.liveBoundaryRoots.add(turn);
+      return changedTurns;
     }
 
     function isAppErrorShell(aside) {
@@ -376,6 +401,7 @@
         return;
       }
       updateLatestTurnKnowledge();
+      const currentLiveTurns = computeLiveProtectedTurns(state.latestTurnIndex);
       for (const aside of [...state.oldAppLoadErrors]) {
         if (!aside.isConnected || !isAppTemplateFetchErrorCard(aside)) {
           aside.classList.remove('csg-old-app-load-error');
@@ -384,7 +410,8 @@
           continue;
         }
         const index = turnIndexFromId(turnId(aside.closest(TURN_SELECTOR)));
-        const canProveOld = index >= 0 && state.latestTurnIndex >= 0 && index < state.latestTurnIndex;
+        const canProveOld = index >= 0 && state.latestTurnIndex >= 0 &&
+          !isProtectedLiveToolTurn(aside, state.latestTurnIndex, currentLiveTurns);
         aside.classList.toggle('csg-old-app-load-error', canProveOld);
       }
       state.oldAppStableTurns = routeTurnSnapshot();
@@ -670,9 +697,14 @@
       if (compact.size > 160) {
         const mountedTurns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
         const extras = [...compact]
-          .filter((node) => !node.matches?.('[data-testid^="conversation-turn-"]'))
-          .slice(-40);
-        state.pendingRoots = new Set([...mountedTurns, ...extras]);
+          .filter((node) => !node.matches?.('[data-testid^="conversation-turn-"]'));
+        const errorExtras = extras.filter((node) =>
+          node.matches?.('aside[class*="surface-error"], .csg-old-app-load-error') ||
+          Boolean(node.querySelector?.('aside[class*="surface-error"], .csg-old-app-load-error'))
+        );
+        const errorSet = new Set(errorExtras);
+        const ordinaryExtras = extras.filter((node) => !errorSet.has(node)).slice(-40);
+        state.pendingRoots = new Set([...mountedTurns, ...errorExtras, ...ordinaryExtras]);
       } else {
         state.pendingRoots = compact;
       }
@@ -687,8 +719,24 @@
       state.scheduled = true;
       idle(() => {
         state.scheduled = false;
-        const batch = [...state.pendingRoots].slice(0, 80);
-        batch.forEach((node) => state.pendingRoots.delete(node));
+        const latestTurnIndex = mountedLatestTurnIndex();
+        // Advancing, rewinding, or reusing a turn node can change which DOM
+        // elements are protected as live UI. Keep those roots in a dedicated
+        // priority queue so a large boundary transition cannot be starved by
+        // ordinary streaming mutations.
+        queueLiveProtectionBoundaryChanges(latestTurnIndex);
+        for (const node of [...state.liveBoundaryRoots]) {
+          if (!node.isConnected) state.liveBoundaryRoots.delete(node);
+        }
+        const urgentBoundaryRoots = [...state.liveBoundaryRoots].slice(0, 80);
+        const urgentSet = new Set(urgentBoundaryRoots);
+        const remainingBudget = Math.max(0, 80 - urgentBoundaryRoots.length);
+        const normalRoots = [...state.pendingRoots]
+          .filter((node) => !urgentSet.has(node))
+          .slice(0, remainingBudget);
+        const batch = [...urgentBoundaryRoots, ...normalRoots];
+        for (const node of urgentBoundaryRoots) state.liveBoundaryRoots.delete(node);
+        for (const node of normalRoots) state.pendingRoots.delete(node);
         const batchSet = new Set(batch);
         const roots = batch.filter((node) => {
           for (let parent = node.parentElement; parent; parent = parent.parentElement) {
@@ -696,12 +744,11 @@
           }
           return true;
         });
-        const latestTurnIndex = mountedLatestTurnIndex();
         roots.forEach((node) => scanRoot(node, latestTurnIndex));
         if (state.textToolShells.size) cleanupToolChrome(latestTurnIndex);
         updateStatus();
         scheduleFreeze();
-        if (state.pendingRoots.size) scheduleScan();
+        if (state.liveBoundaryRoots.size || state.pendingRoots.size) scheduleScan();
       });
     }
 
@@ -854,6 +901,7 @@
     const observer = new MutationObserver((mutations) => {
       if (!state.settings.enabled) return;
       let removed = false;
+      let removedConversationTurn = false;
       for (const mutation of mutations) {
         if (mutation.type === 'attributes') {
           const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
@@ -878,13 +926,19 @@
         for (const node of mutation.addedNodes) {
           if (node instanceof Element) scheduleScan(node);
         }
-        if (!removed) {
-          for (const node of mutation.removedNodes) {
-            if (node instanceof Element) { removed = true; break; }
+        for (const node of mutation.removedNodes) {
+          if (!(node instanceof Element)) continue;
+          removed = true;
+          if (!removedConversationTurn &&
+              (node.matches(TURN_SELECTOR) || Boolean(node.querySelector(TURN_SELECTOR)))) {
+            removedConversationTurn = true;
           }
         }
       }
       if (removed) scheduleDetachedCleanup();
+      // A branch/route transition can lower the latest numeric turn solely by
+      // removing DOM. Trigger a boundary-only scan even when no new node exists.
+      if (removedConversationTurn) scheduleScan();
     });
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

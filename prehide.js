@@ -23,6 +23,7 @@
     let active = false;
     let observing = false;
     let latestTurnIndex = -1;
+    let protectedTurns = new Set();
 
     function updateCount() {
       document.documentElement.dataset.csgPrehideCount = String(marked.size);
@@ -66,13 +67,37 @@
         (node.matches(TURN_SELECTOR) || Boolean(node.querySelector(TURN_SELECTOR)));
     }
 
-    function isProtectedLiveToolTurn(element, latestIndex) {
+    function computeProtectedTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+      const next = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
+      for (const turn of turns) {
+        const index = turnIndex(turn);
+        if (index < 0 || latestIndex < 0 || index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1)) next.add(turn);
+      }
+      return next;
+    }
+
+    function isProtectedLiveToolTurn(element, latestIndex, liveTurns = protectedTurns) {
       if (!(element instanceof Element)) return true;
       const turn = element.closest(TURN_SELECTOR);
       if (!(turn instanceof Element)) return true;
+      if (liveTurns?.has(turn)) return true;
       const index = turnIndex(turn);
       if (index < 0 || latestIndex < 0) return true;
       return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
+    }
+
+    function rescanProtectionBoundary(nextLatestTurnIndex) {
+      const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+      const previousProtectedTurns = protectedTurns;
+      const nextProtectedTurns = computeProtectedTurns(nextLatestTurnIndex, turns);
+      // mark()/stillPlaceholder() consults protectedTurns, so publish the new
+      // protection set before rescanning nodes whose membership changed.
+      protectedTurns = nextProtectedTurns;
+      for (const turn of turns) {
+        if (previousProtectedTurns.has(turn) !== nextProtectedTurns.has(turn)) {
+          scan(turn, nextLatestTurnIndex);
+        }
+      }
     }
 
     function isConversationRoute() {
@@ -246,7 +271,10 @@
         turnsChanged = true;
         break;
       }
-      if (turnsChanged) latestTurnIndex = mountedLatestTurnIndex();
+      if (turnsChanged) {
+        latestTurnIndex = mountedLatestTurnIndex();
+        rescanProtectionBoundary(latestTurnIndex);
+      }
       for (const mutation of mutations) {
         if (mutation.type === 'attributes') {
           scan(mutation.target, latestTurnIndex);
@@ -281,6 +309,7 @@
         return;
       }
       latestTurnIndex = mountedLatestTurnIndex();
+      protectedTurns = computeProtectedTurns(latestTurnIndex);
       startObserving();
       scan(document.documentElement, latestTurnIndex);
     });

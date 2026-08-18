@@ -121,7 +121,7 @@ def main():
         "surface-wrapper-and-split-text",
         make_turn(0, '<aside class="surface-error"><h3 class="text-token-text-error">error</h3><span>Failed to</span><p>fetch template</p></aside>') +
         make_turn(1, '<div>new latest</div>'),
-        [{"name": "split-text", "selector": '[data-testid="conversation-turn-0"] aside', "hidden": True, "maxClassChanges": 1}],
+        [{"name": "split-text-live-window", "selector": '[data-testid="conversation-turn-0"] aside', "hidden": False, "maxClassChanges": 1}],
         after_load="""
 const splitTarget = document.querySelector('[data-testid="conversation-turn-0"] aside');
 if (splitTarget) {
@@ -145,13 +145,26 @@ setTimeout(() => {
 """,
     )
     run_case(
-        "dynamic-new-turn-hides-former-latest",
+        "dynamic-one-new-turn-keeps-former-latest-live",
         make_turn(0, '<div>user</div>') + make_turn(1, error_card()),
-        [{"name": "former-latest", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": True}],
+        [{"name": "former-latest-live", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": False}],
         after_load="""
 setTimeout(() => {
   document.body.insertAdjacentHTML('beforeend', '<section data-testid="conversation-turn-2"><div>new turn</div></section>');
 }, 250);
+""",
+    )
+    run_case(
+        "dynamic-two-new-turns-hide-former-latest",
+        make_turn(0, '<div>user</div>') + make_turn(1, error_card()),
+        [{"name": "former-latest-old", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": True}],
+        after_load="""
+setTimeout(() => {
+  document.body.insertAdjacentHTML('beforeend', '<section data-testid="conversation-turn-2"><div>new turn</div></section>');
+}, 200);
+setTimeout(() => {
+  document.body.insertAdjacentHTML('beforeend', '<section data-testid="conversation-turn-3"><div>newest turn</div></section>');
+}, 500);
 """,
     )
     run_case(
@@ -175,16 +188,16 @@ setTimeout(() => {
 }, 300);
 setTimeout(() => {
   document.querySelectorAll('[data-testid^="conversation-turn-"]').forEach((el) => el.remove());
-  document.body.insertAdjacentHTML('beforeend', '<section data-testid="conversation-turn-0"><div>new user</div></section><section data-testid="conversation-turn-1"><aside id="new-route-error" class="text-token-text-error surface-error"><h3 class="text-token-text-error">error</h3><div>Failed to fetch template</div></aside></section><section data-testid="conversation-turn-2"><div>new latest</div></section>');
+  document.body.insertAdjacentHTML('beforeend', '<section data-testid="conversation-turn-0"><div>new user</div></section><section data-testid="conversation-turn-1"><aside id="new-route-error" class="text-token-text-error surface-error"><h3 class="text-token-text-error">error</h3><div>Failed to fetch template</div></aside></section><section data-testid="conversation-turn-2"><div>later</div></section><section data-testid="conversation-turn-3"><div>new latest</div></section>');
 }, 430);
 """,
     )
     run_case(
         "route-reuse-fallback-recovers",
-        make_turn(0, error_card()) + make_turn(1, error_card()),
+        make_turn(0, error_card()) + make_turn(1, error_card()) + make_turn(2, '<div>latest</div>'),
         [
             {"name": "fallback-old-hidden", "selector": '[data-testid="conversation-turn-0"] aside', "hidden": True},
-            {"name": "fallback-latest-visible", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": False},
+            {"name": "fallback-live-visible", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": False},
         ],
         after_load="""
 setTimeout(() => {

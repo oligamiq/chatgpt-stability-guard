@@ -11,7 +11,7 @@ python3 scripts/test.py
 
 Upload only:
 
-`dist/stability-guard-for-chatgpt-1.0.12.zip`
+`dist/stability-guard-for-chatgpt-1.0.13.zip`
 
 The packaging script removes the local development `key` from the Store ZIP. After the first Dashboard upload, use the Store item's public key for local development if you want the unpacked build to share the Store item ID.
 
