@@ -10,6 +10,7 @@
 
     const marked = new Set();
     const partsByBlock = new WeakMap();
+    const placeholderObservers = new WeakMap();
     const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
     const ACTIONABLE_UI_SELECTOR = [
       'a[href]', 'button', 'input:not([type="hidden"])', 'select', 'textarea', 'summary',
@@ -21,6 +22,7 @@
     ].join(',');
     let active = false;
     let observing = false;
+    let latestTurnIndex = -1;
 
     function updateCount() {
       document.documentElement.dataset.csgPrehideCount = String(marked.size);
@@ -43,6 +45,34 @@
     function hasActionableUi(element) {
       return element instanceof Element &&
         (element.matches(ACTIONABLE_UI_SELECTOR) || Boolean(element.querySelector(ACTIONABLE_UI_SELECTOR)));
+    }
+
+    const LIVE_TOOL_GUARD_TURNS = 2;
+
+    function turnIndex(turn) {
+      const id = turn?.getAttribute?.('data-testid') || '';
+      const match = /^conversation-turn-(\d+)$/.exec(id);
+      return match ? Number(match[1]) : -1;
+    }
+
+    function mountedLatestTurnIndex() {
+      let latest = -1;
+      for (const turn of document.querySelectorAll(TURN_SELECTOR)) latest = Math.max(latest, turnIndex(turn));
+      return latest;
+    }
+
+    function nodeContainsConversationTurn(node) {
+      return node instanceof Element &&
+        (node.matches(TURN_SELECTOR) || Boolean(node.querySelector(TURN_SELECTOR)));
+    }
+
+    function isProtectedLiveToolTurn(element, latestIndex) {
+      if (!(element instanceof Element)) return true;
+      const turn = element.closest(TURN_SELECTOR);
+      if (!(turn instanceof Element)) return true;
+      const index = turnIndex(turn);
+      if (index < 0 || latestIndex < 0) return true;
+      return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
     }
 
     function isConversationRoute() {
@@ -107,8 +137,11 @@
       return { header, divider };
     }
 
-    function stillPlaceholder(block) {
+    function stillPlaceholder(block, latestTurnIndex) {
       if (!getParts(block)) return false;
+      // Do not display:none placeholders in the newest exchange. ChatGPT apps
+      // may start template/bootstrap work only after the live card is visible.
+      if (isProtectedLiveToolTurn(block, latestTurnIndex)) return false;
       if (block.classList.contains('csg-tool-embed')) return false;
       if (normalize(block.textContent)) return false;
       // A text-empty auth/action card can still contain icon buttons or custom
@@ -122,21 +155,45 @@
       parts?.divider?.classList.remove('csg-prehide-tool-block');
     }
 
+    function stopPlaceholderObserver(block) {
+      const watched = placeholderObservers.get(block);
+      watched?.observer?.disconnect();
+      placeholderObservers.delete(block);
+    }
+
+    function watchPlaceholder(block, parts) {
+      const stack = block?.parentElement;
+      if (!(stack instanceof Element)) return;
+      const existing = placeholderObservers.get(block);
+      if (existing?.stack === stack) return;
+      existing?.observer?.disconnect();
+      const observer = new MutationObserver(() => mark(block, latestTurnIndex));
+      observer.observe(stack, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['href', 'tabindex', 'role', 'contenteditable', 'type', 'aria-modal', 'aria-label', 'title']
+      });
+      placeholderObservers.set(block, { observer, stack });
+    }
+
     function clearMark(block) {
       const cached = partsByBlock.get(block);
       const live = getParts(block);
       block.classList.remove('csg-prehide-tool-block');
       clearParts(cached);
       if (!cached || live?.header !== cached.header || live?.divider !== cached.divider) clearParts(live);
+      stopPlaceholderObserver(block);
       partsByBlock.delete(block);
       marked.delete(block);
       updateCount();
     }
 
-    function mark(block) {
+    function mark(block, latestTurnIndex) {
       if (!active) return;
       const parts = getParts(block);
-      if (!parts || !stillPlaceholder(block)) {
+      if (!parts || !stillPlaceholder(block, latestTurnIndex)) {
         if (marked.has(block)) clearMark(block);
         return;
       }
@@ -151,22 +208,14 @@
       if (parts.divider?.classList.contains('h-px')) parts.divider.classList.add('csg-prehide-tool-block');
       marked.add(block);
       partsByBlock.set(block, parts);
+      watchPlaceholder(block, parts);
       updateCount();
     }
 
-    function scan(node) {
+    function scan(node, latestTurnIndex) {
       if (!(node instanceof Element)) return;
-      if (node.matches('.no-scrollbar')) mark(node);
-      node.querySelectorAll?.('.no-scrollbar').forEach(mark);
-    }
-
-    function placeholderBlockFor(element) {
-      if (!(element instanceof Element)) return null;
-      const direct = element.closest('.no-scrollbar');
-      if (direct) return direct;
-      const header = element.closest('.mt-2');
-      const sibling = header?.nextElementSibling;
-      return sibling?.classList.contains('no-scrollbar') ? sibling : null;
+      if (node.matches('.no-scrollbar')) mark(node, latestTurnIndex);
+      node.querySelectorAll?.('.no-scrollbar').forEach((block) => mark(block, latestTurnIndex));
     }
 
     function clearAll() {
@@ -183,25 +232,42 @@
 
     const observer = new MutationObserver((mutations) => {
       if (!active) return;
+      let turnsChanged = false;
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) scan(node);
+        if (mutation.type === 'attributes') {
+          const oldId = String(mutation.oldValue || '');
+          if (mutation.target.matches?.(TURN_SELECTOR) || oldId.startsWith('conversation-turn-')) {
+            turnsChanged = true;
+            break;
+          }
+          continue;
+        }
+        if (![...mutation.addedNodes, ...mutation.removedNodes].some(nodeContainsConversationTurn)) continue;
+        turnsChanged = true;
+        break;
+      }
+      if (turnsChanged) latestTurnIndex = mountedLatestTurnIndex();
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes') {
+          scan(mutation.target, latestTurnIndex);
+          continue;
+        }
+        for (const node of mutation.addedNodes) scan(node, latestTurnIndex);
         for (const node of mutation.removedNodes) cleanupRemoved(node);
-        const targetElement = mutation.target instanceof Element
-          ? mutation.target : mutation.target.parentElement;
-        const block = placeholderBlockFor(targetElement);
-        if (block) mark(block);
       }
     });
 
     function startObserving() {
       if (observing) return;
       observing = true;
+      // Global observation is structural only. Fine-grained text/attribute
+      // changes are observed only inside placeholders that are actually hidden.
       observer.observe(document.documentElement, {
         childList: true,
         subtree: true,
-        characterData: true,
         attributes: true,
-        attributeFilter: ['href', 'tabindex', 'role', 'contenteditable', 'type', 'aria-modal', 'aria-label', 'title']
+        attributeFilter: ['data-testid'],
+        attributeOldValue: true
       });
     }
 
@@ -214,8 +280,9 @@
         clearAll();
         return;
       }
+      latestTurnIndex = mountedLatestTurnIndex();
       startObserving();
-      scan(document.documentElement);
+      scan(document.documentElement, latestTurnIndex);
     });
   }
 })();

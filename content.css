@@ -2,7 +2,7 @@ html.csg-reduce-motion {
   scroll-behavior: auto !important;
 }
 
-html.csg-reduce-motion [data-testid^="conversation-turn-"] :where(
+html.csg-reduce-motion :where(.csg-thinking, .csg-tool) :where(
   [class*="animate-"],
   [class*="transition-"],
   [role="progressbar"],

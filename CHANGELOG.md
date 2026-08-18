@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.12 — 2026-08-18
+
+- Prevented Stability Guard from hiding or lazy-rendering the newest ChatGPT app/tool turns while their templates and UI are still bootstrapping.
+- Restricted reduced-motion overrides to already-classified passive traces so live app loaders keep their native transition/animation lifecycle.
+- Reduced global MutationObserver work by moving fine-grained placeholder observation to only the old placeholders that are actually hidden.
+- Added regression coverage proving the current app embed, placeholder, Retry UI, and loading motion remain physically rendered and interactive.
+
 ## 1.0.11 — 2026-08-18
 
 - Fixed Stability Guard interfering with ChatGPT connector/plugin Connect, Add, authentication, and Library controls.

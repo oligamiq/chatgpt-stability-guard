@@ -170,6 +170,25 @@
       return match ? Number(match[1]) : -1;
     }
 
+    const LIVE_TOOL_GUARD_TURNS = 2;
+
+    function mountedLatestTurnIndex() {
+      let latest = -1;
+      for (const turn of document.querySelectorAll(TURN_SELECTOR)) {
+        latest = Math.max(latest, turnIndexFromId(turnId(turn)));
+      }
+      return latest;
+    }
+
+    function isProtectedLiveToolTurn(element, latestIndex = mountedLatestTurnIndex()) {
+      if (!(element instanceof Element)) return true;
+      const turn = element.closest(TURN_SELECTOR);
+      if (!(turn instanceof Element)) return true;
+      const index = turnIndexFromId(turnId(turn));
+      if (index < 0 || latestIndex < 0) return true;
+      return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
+    }
+
     function isAppErrorShell(aside) {
       if (!(aside instanceof Element) || aside.tagName !== 'ASIDE') return false;
       return String(aside.className || '').includes('surface-error');
@@ -405,15 +424,18 @@
       if (changed || turnStructureChanged) scheduleOldAppErrorRefresh();
     }
 
-    function analyzeElement(el) {
+    function analyzeElement(el, latestTurnIndex) {
       if (!(el instanceof Element)) return null;
       const inTurn = isConversationTurnScoped(el);
       const testId = el.getAttribute('data-testid') || '';
       const hasAppAction = inTurn && hasActionableUi(el, true);
+      const liveToolProtected = inTurn && isProtectedLiveToolTurn(el, latestTurnIndex);
       // Interactive rich UI must fail open. Thinking/tool traces are optimization
       // targets; Connect/Add/auth controls are application UI and stay untouched.
-      const isThinking = inTurn && hasKey(testId, THINK_KEYS) && !hasAppAction;
-      const isTool = inTurn && hasKey(testId, TOOL_KEYS) && !hasAppAction;
+      // Tool wrappers in the newest exchange are also kept live because ChatGPT
+      // apps can defer template/bootstrap work until their DOM is visible/laid out.
+      const isThinking = inTurn && hasKey(testId, THINK_KEYS) && !hasAppAction && !liveToolProtected;
+      const isTool = inTurn && hasKey(testId, TOOL_KEYS) && !hasAppAction && !liveToolProtected;
       const isTrace = isThinking || isTool;
       const traceChildren = [...el.children].filter((child) => child.classList.contains('csg-trace-body'));
       let traceBody = null;
@@ -421,7 +443,7 @@
         const body = el.lastElementChild;
         if (body && !hasActionableUi(body, true)) traceBody = body;
       }
-      const isHeavy = inTurn && state.settings.lazyHeavyBlocks &&
+      const isHeavy = inTurn && !liveToolProtected && state.settings.lazyHeavyBlocks &&
         (el.matches('pre') || hasKey(testId, ['code']));
       return { el, isThinking, isTool, isHeavy, traceChildren, traceBody };
     }
@@ -451,8 +473,9 @@
       state.toolShellMarkers.delete(shell);
     }
 
-    function isPassiveStructuralToolShell(shell) {
+    function isPassiveStructuralToolShell(shell, latestTurnIndex) {
       return isConversationTurnScoped(shell) &&
+        !isProtectedLiveToolTurn(shell, latestTurnIndex) &&
         shell.matches('[class~="group/tool-message"]') &&
         !hasActionableUi(shell, true);
     }
@@ -462,9 +485,12 @@
         marker.closest('details') || marker;
     }
 
-    function getEmbeddedToolParts(block) {
+    function getEmbeddedToolParts(block, latestTurnIndex) {
       if (!(block instanceof Element) || !block.classList.contains('no-scrollbar')) return null;
       if (!isConversationTurnScoped(block) || !block.closest('.agent-turn')) return null;
+      // Never display:none a live/recent ChatGPT app/tool card. Some app loaders
+      // bootstrap lazily from visibility/layout and can fail template loading if hidden.
+      if (isProtectedLiveToolTurn(block, latestTurnIndex)) return null;
       // Rich tool/app cards can contain authentication, Connect, Add, links, or
       // other controls. Never hide those as a passive embed.
       if (hasActionableUi(block)) return null;
@@ -492,10 +518,10 @@
       state.embeddedToolBlocks.delete(block);
     }
 
-    function reconcileEmbeddedToolBlock(block) {
+    function reconcileEmbeddedToolBlock(block, latestTurnIndex) {
       if (!(block instanceof Element)) return;
       const oldParts = state.embeddedToolBlocks.get(block);
-      const parts = getEmbeddedToolParts(block);
+      const parts = getEmbeddedToolParts(block, latestTurnIndex);
       if (!parts) {
         if (oldParts || block.classList.contains('csg-tool-embed')) clearEmbeddedToolBlock(block, oldParts);
         return;
@@ -511,8 +537,9 @@
     }
 
     function cleanupEmbeddedToolBlocks() {
+      const latestTurnIndex = mountedLatestTurnIndex();
       for (const [block] of [...state.embeddedToolBlocks]) {
-        if (!block.isConnected || !getEmbeddedToolParts(block)) clearEmbeddedToolBlock(block);
+        if (!block.isConnected || !getEmbeddedToolParts(block, latestTurnIndex)) clearEmbeddedToolBlock(block);
       }
     }
 
@@ -535,11 +562,11 @@
 
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';
 
-    function classifyToolChromeCandidate(el) {
+    function classifyToolChromeCandidate(el, latestTurnIndex) {
       if (!(el instanceof Element) || el.closest('.markdown') || !isConversationTurnScoped(el)) return;
       const structuralShell = el.closest('[class~="group/tool-message"]');
       if (structuralShell) {
-        if (isPassiveStructuralToolShell(structuralShell)) markToolChrome(structuralShell, el);
+        if (isPassiveStructuralToolShell(structuralShell, latestTurnIndex)) markToolChrome(structuralShell, el);
         else unmarkToolChrome(structuralShell);
         return;
       }
@@ -547,15 +574,19 @@
       if (!label || label.length > 180) return;
       if (isToolSummaryLabel(label)) {
         const shell = findToolSummaryShell(el);
-        if (hasActionableUi(shell, true)) unmarkToolChrome(shell);
+        if (isProtectedLiveToolTurn(shell, latestTurnIndex) || hasActionableUi(shell, true)) unmarkToolChrome(shell);
         else markToolChrome(shell, el);
-      } else if (isConfigLabel(label)) markToolChrome(el, el);
+      } else if (isConfigLabel(label)) {
+        if (isProtectedLiveToolTurn(el, latestTurnIndex)) unmarkToolChrome(el);
+        else markToolChrome(el, el);
+      }
     }
 
-    function shellHasToolLabel(shell) {
+    function shellHasToolLabel(shell, latestTurnIndex) {
       const marker = state.toolShellMarkers.get(shell);
       if (!(marker instanceof Element) || !marker.isConnected || !shell.contains(marker)) return false;
-      if (shell.matches('[class~="group/tool-message"]')) return isPassiveStructuralToolShell(shell);
+      if (isProtectedLiveToolTurn(shell, latestTurnIndex)) return false;
+      if (shell.matches('[class~="group/tool-message"]')) return isPassiveStructuralToolShell(shell, latestTurnIndex);
       if (!isConversationTurnScoped(shell)) return false;
       const label = normalizeLabel(marker.textContent);
       if (label.length > 180) return false;
@@ -570,10 +601,10 @@
     function observeToolMarker(_marker) {}
     function refreshToolShellObserver() {}
 
-    function cleanupToolChrome() {
+    function cleanupToolChrome(latestTurnIndex = mountedLatestTurnIndex()) {
       let changed = false;
       for (const shell of state.textToolShells) {
-        if (!shell.isConnected || !shellHasToolLabel(shell)) {
+        if (!shell.isConnected || !shellHasToolLabel(shell, latestTurnIndex)) {
           shell.classList.remove('csg-tool-ui');
           state.textToolShells.delete(shell);
           state.toolShellMarkers.delete(shell);
@@ -582,7 +613,7 @@
       }
     }
 
-    function scanRoot(scanRoot) {
+    function scanRoot(scanRoot, latestTurnIndex = mountedLatestTurnIndex()) {
       if (!(scanRoot instanceof Element)) return;
       state.stats.scans += 1;
 
@@ -594,7 +625,7 @@
         ...scanRoot.querySelectorAll('[data-testid], .csg-thinking, .csg-tool, .csg-heavy, pre, aside[class*="surface-error"]')
       ];
       const uniqueCandidates = [...new Set(candidates)];
-      const plans = uniqueCandidates.map(analyzeElement);
+      const plans = uniqueCandidates.map((el) => analyzeElement(el, latestTurnIndex));
       const oldAppErrorCandidates = state.settings.enabled && state.settings.hideOldAppLoadErrors
         ? uniqueCandidates.filter((el) => el.tagName === 'ASIDE' && (
             String(el.className || '').includes('surface-error') ||
@@ -622,8 +653,8 @@
       for (const el of existingTraceBodies) {
         if (!el.parentElement?.matches('.csg-thinking, .csg-tool')) el.classList.remove('csg-trace-body');
       }
-      for (const block of embeddedToolCandidates) reconcileEmbeddedToolBlock(block);
-      for (const candidate of toolCandidates) classifyToolChromeCandidate(candidate);
+      for (const block of embeddedToolCandidates) reconcileEmbeddedToolBlock(block, latestTurnIndex);
+      for (const candidate of toolCandidates) classifyToolChromeCandidate(candidate, latestTurnIndex);
       scanOldAppErrors(oldAppErrorCandidates, turnStructureChanged);
     }
 
@@ -665,8 +696,9 @@
           }
           return true;
         });
-        roots.forEach(scanRoot);
-        if (state.textToolShells.size) cleanupToolChrome();
+        const latestTurnIndex = mountedLatestTurnIndex();
+        roots.forEach((node) => scanRoot(node, latestTurnIndex));
+        if (state.textToolShells.size) cleanupToolChrome(latestTurnIndex);
         updateStatus();
         scheduleFreeze();
         if (state.pendingRoots.size) scheduleScan();

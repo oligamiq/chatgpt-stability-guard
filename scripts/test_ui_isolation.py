@@ -46,6 +46,7 @@ def build_page():
     settings = json.dumps(SETTINGS)
     return f'''<!doctype html><html><head><meta charset="utf-8"><style>
 .transition-fixture,.animate-fixture{{transition-duration:2s;animation-duration:2s;}}
+.live-box{{display:block;min-height:24px;min-width:24px;}}
 body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
 {CONTENT_CSS}
 {PREHIDE_CSS}
@@ -137,8 +138,23 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
   <div class="agent-turn">
     <div class="grow flex flex-col">
       <div id="dynamic-header-placeholder-header" class="mt-2"><a id="dynamic-header-connect" aria-label="Connect" style="display:block;width:20px;height:20px"></a></div>
-      <div id="dynamic-header-placeholder-body" class="no-scrollbar"></div><div class="h-px"></div>
+      <div id="dynamic-header-placeholder-body" class="no-scrollbar live-box"></div><div class="h-px"></div>
     </div>
+  </div>
+</section>
+<section data-testid="conversation-turn-8" data-turn="assistant">
+  <div class="agent-turn">
+    <div id="live-tool" class="live-box" data-testid="tool-live"><div>Live tool</div><div id="live-app-motion" class="transition-fixture" role="progressbar">loading</div></div>
+    <div id="live-shell" class="group/tool-message live-box"><button aria-expanded="false">Tools were called</button></div>
+    <div id="live-embed-header"><div role="button"><img alt="LiveApp"><button>Menu</button>LiveApp</div></div>
+    <div id="live-embed" class="no-scrollbar live-box">loading app</div><div class="h-px"></div>
+    <div class="grow flex flex-col">
+      <div id="live-placeholder-header" class="mt-2">Loading app template</div>
+      <div id="live-placeholder" class="no-scrollbar live-box"></div><div class="h-px"></div>
+    </div>
+    <aside id="live-app-error" class="text-token-text-error surface-error">
+      <h3 class="text-token-text-error">Error loading app</h3><div>Failed to fetch template</div><button id="live-retry">Retry</button>
+    </aside>
   </div>
 </section>
 <script>
@@ -152,7 +168,7 @@ window.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:{{ge
 <script>
 window.__clicks={{}};
 const ACTION_IDS=['connector','library','inner-connect','auth-link','aria-switch','thinking-connect','shell-connect','details-connect','embed-connect',
-  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect'];
+  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect','live-retry'];
 function registerAction(id) {{
   const el=document.getElementById(id);
   if (!el || el.dataset.csgTestBound==='1') return;
@@ -164,9 +180,17 @@ function snapshot(id) {{
   const el=document.getElementById(id);
   const style=getComputedStyle(el);
   const rect=el.getBoundingClientRect();
-  return {{classes:[...el.classList],display:style.display,visibility:style.visibility,
-    pointerEvents:style.pointerEvents,transitionDuration:style.transitionDuration,
+  return {{classes:[...el.classList],display:style.display,visibility:style.visibility,opacity:style.opacity,
+    pointerEvents:style.pointerEvents,transitionDuration:style.transitionDuration,animationDuration:style.animationDuration,
     contentVisibility:style.contentVisibility,width:rect.width,height:rect.height}};
+}}
+function physicallyRendered(id) {{
+  const el=document.getElementById(id);
+  el.scrollIntoView({{block:'center',inline:'nearest'}});
+  const style=getComputedStyle(el); const rect=el.getBoundingClientRect();
+  if (!rect.width || !rect.height || style.display==='none' || style.visibility==='hidden' || Number(style.opacity)===0) return false;
+  const hit=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);
+  return Boolean(hit && (hit===el || el.contains(hit)));
 }}
 function hitClick(id) {{
   const el=document.getElementById(id);
@@ -206,7 +230,8 @@ setTimeout(() => {{
     'tool-with-aria-action','dynamic-input-tool','passive-thinking','interactive-thinking','dynamic-tool','passive-shell','interactive-shell','passive-details',
     'interactive-details','dynamic-details','embed-passive','embed-action','embed-dynamic','embed-text-dynamic','placeholder-passive',
     'placeholder-action','placeholder-header-action','placeholder-header-body','dynamic-placeholder','dynamic-header-placeholder-header',
-    'dynamic-header-placeholder-body','inside-motion','streamed-fragment','inside-pre']) {{
+    'dynamic-header-placeholder-body','live-tool','live-shell','live-embed','live-placeholder','live-app-error','live-app-motion',
+    'inside-motion','streamed-fragment','inside-pre']) {{
     states[id]=snapshot(id);
   }}
   const result={{
@@ -238,7 +263,13 @@ setTimeout(() => {{
     placeholderHeaderBodyHidden: states['placeholder-header-body'].classes.includes('csg-prehide-tool-block') && states['placeholder-header-body'].display==='none',
     dynamicPlaceholderReleased: !states['dynamic-placeholder'].classes.includes('csg-prehide-tool-block') && states['dynamic-placeholder'].display!=='none',
     dynamicHeaderActionVisible: !states['dynamic-header-placeholder-header'].classes.includes('csg-prehide-tool-block') && states['dynamic-header-placeholder-header'].display!=='none',
-    dynamicHeaderBodyStillHidden: states['dynamic-header-placeholder-body'].classes.includes('csg-prehide-tool-block') && states['dynamic-header-placeholder-body'].display==='none',
+    recentHeaderBodyProtected: !states['dynamic-header-placeholder-body'].classes.includes('csg-prehide-tool-block') && physicallyRendered('dynamic-header-placeholder-body'),
+    liveToolVisible: !states['live-tool'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-tool'),
+    liveShellVisible: !states['live-shell'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-shell'),
+    liveEmbedVisible: !states['live-embed'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-embed'),
+    livePlaceholderVisible: !states['live-placeholder'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-placeholder'),
+    liveAppErrorVisible: !states['live-app-error'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-app-error'),
+    liveAppMotionNative: states['live-app-motion'].transitionDuration==='2s' && states['live-app-motion'].animationDuration==='2s' && physicallyRendered('live-app-motion'),
     streamedFragmentNotContained: !states['streamed-fragment'].classes.includes('csg-trace-body') && states['streamed-fragment'].contentVisibility!=='auto',
     insideMotionReduced: states['inside-motion'].transitionDuration!=='2s',
     insidePreLazy: states['inside-pre'].contentVisibility==='auto',
