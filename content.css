@@ -35,8 +35,24 @@ html.csg-hide-tool-summary .csg-tool-summary-live {
 }
 
 /* Never display:none a ChatGPT tool/App lifecycle shell. App content can mount
-   into these nodes later, including when an old turn is revisited. Remove only
-   standalone label nodes after they leave the protected live window. */
+   into these nodes later, including when an old turn is revisited. A completed
+   passive group/tool-message is summary chrome only, though, so take that shell
+   out of flex flow at 0x0 instead of leaving one gap-4 slot per tool call. */
+html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 html.csg-hide-tool-summary .csg-tool-summary:not([class~="group/tool-message"]):not(details):not(summary) {
   opacity: 0 !important;
   color: transparent !important;
@@ -95,36 +111,59 @@ html.csg-hide-tool-summary .csg-tool-summary button:is(
   line-height: 0 !important;
 }
 
-/* Preview surfaces bootstrap while fully laid out. During a short settle window
-   keep them mounted and measurable but visually quiet. A preview that remains a
-   tiny fallback surface is later moved out of layout without display:none. */
+/* Passive Tool/App previews stay mounted for ChatGPT/React but are removed from
+   conversation layout when hideToolEmbeds is enabled. Bootstrap/error/action UI
+   fails open in JS, so users never lose Retry/Auth/Connect controls. */
 html.csg-hide-tool-embeds .csg-preview-settling,
 html.csg-hide-tool-embeds [data-csg-preview-state="settling"] {
   opacity: 0 !important;
 }
 
+html.csg-hide-tool-embeds .csg-hidden-preview,
+html.csg-hide-tool-embeds .csg-hidden-preview-header,
+html.csg-hide-tool-embeds [data-csg-preview-state="hidden"],
 html.csg-hide-tool-embeds .csg-broken-preview,
 html.csg-hide-tool-embeds .csg-broken-preview-header,
 html.csg-hide-tool-embeds [data-csg-preview-state="broken"] {
-  /* Remove the broken preview from flex layout without changing the App/iframe's
-     own measurable box. This also removes flex-gap whitespace that negative
-     margins cannot cancel, while ResizeObserver can still detect later growth. */
+  /* Remove the preview/header from flex layout without detaching React-owned
+     nodes. The iframe keeps its own measurable box for runtime stability while
+     flex-gap whitespace disappears from the conversation. */
   position: absolute !important;
   opacity: 0 !important;
   pointer-events: none !important;
   margin: 0 !important;
 }
 
+html.csg-hide-tool-embeds .no-scrollbar.csg-hidden-preview,
+html.csg-hide-tool-embeds .no-scrollbar[data-csg-preview-state="hidden"],
 html.csg-hide-tool-embeds .no-scrollbar.csg-broken-preview,
 html.csg-hide-tool-embeds .no-scrollbar[data-csg-preview-state="broken"] {
-  /* JS snapshots the actual in-flow chat-column width before absolute
-     positioning. If React ever strips that custom property, these declarations
-     simply become invalid rather than expanding the hidden App to viewport width. */
+  /* While generation is active JS adds csg-preview-live-layout so the hidden
+     iframe keeps a measurable bootstrap box. Completed previews override this
+     width below and become a real 0x0 box. */
   inline-size: var(--csg-preview-inline-size) !important;
   max-inline-size: var(--csg-preview-inline-size) !important;
   box-sizing: border-box !important;
 }
 
+html.csg-hide-tool-embeds :is(
+  .csg-hidden-preview,
+  .csg-hidden-preview-header,
+  [data-csg-preview-state="hidden"],
+  .csg-broken-preview,
+  .csg-broken-preview-header,
+  [data-csg-preview-state="broken"]
+):not(.csg-preview-live-layout) {
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  overflow: hidden !important;
+}
+
+html.csg-hide-tool-embeds [data-csg-preview-divider="hidden"],
 html.csg-hide-tool-embeds [data-csg-preview-divider="broken"] {
   display: none !important;
 }

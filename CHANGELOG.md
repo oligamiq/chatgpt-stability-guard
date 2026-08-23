@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.19 — 2026-08-24
+
+- Fixed `hideToolEmbeds` so passive `ui://.../file-preview` Tool/App previews are removed from conversation layout even when the iframe is healthy or large; this eliminates visible `desktop-commander-home` preview contents and the large blank/black space they could reserve.
+- Kept Tool/App iframe nodes mounted for ChatGPT/React while moving their preview mount, header, and divider out of flow; Retry/Auth/Connect/error UI still fails open and remains interactive.
+- Added generation-state-aware protection: hidden Tool/App previews stay out of conversation flow but retain a measurable bootstrap box while ChatGPT is actively generating; once generation ends, completed `group/tool-message` shells become true `0×0` boxes to eliminate accumulated flex gaps, and completed hidden preview/header boxes also collapse to `0×0` to eliminate residual oversized geometry.
+- Added regression coverage for generation-complete handoff, large/percentage-height previews, growth/shrink transitions, iframe/mount replacement, stale divider cleanup, and unrelated actionable sibling controls.
+- Reproduced the reported authenticated `リリースコミット完了` conversation with v1.0.19 directly injected. After generation completed, all 109 Tool shells and all 218 Tool controls measured `0×0`, no visible Tool shell or empty in-flow block ≥100px remained, the two largest affected historical turns shrank from 29,120→4,562px and 4,716→1,442px, and Retry/Add-files/Dictation/Voice UI stayed visible.
+
 ## 1.0.18 — 2026-08-23
 
 - Removed the first-run data-processing consent screen and consent gate; the extension now starts immediately with the saved or default settings after installation or update.

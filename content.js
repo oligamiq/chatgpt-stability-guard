@@ -59,6 +59,9 @@
       summaryLiveObservedTurns: new Set(),
       summaryBoundaryObserver: null,
       summaryBoundaryRoots: new Set(),
+      summaryGenerationObserver: null,
+      summaryGenerationRoot: null,
+      summaryGenerationActive: false,
       previewSurfaces: new Map(),
       previewMounts: new Map(),
       oldAppLoadErrors: new Set(),
@@ -330,6 +333,30 @@
     }
 
     const LIVE_TOOL_GUARD_TURNS = 2;
+    const STOP_GENERATING_SELECTOR = [
+      'button[data-testid="stop-button"]',
+      'button[data-testid="stop-generating-button"]',
+      'button[aria-label="Stop generating" i]',
+      'button[aria-label="Stop answering" i]',
+      'button[aria-label="Stop response" i]',
+      'button[aria-label*="生成を停止"]',
+      'button[aria-label*="応答を停止"]'
+    ].join(',');
+
+    function isGenerationActive() {
+      return Boolean(document.querySelector(STOP_GENERATING_SELECTOR));
+    }
+
+    function wasStopGeneratingAttribute(attributeName, oldValue) {
+      const value = String(oldValue || '').trim();
+      if (!value) return false;
+      if (attributeName === 'data-testid') {
+        return value === 'stop-button' || value === 'stop-generating-button';
+      }
+      if (attributeName !== 'aria-label') return false;
+      return /^(?:Stop generating|Stop answering|Stop response)$/i.test(value) ||
+        value.includes('生成を停止') || value.includes('応答を停止');
+    }
 
     function mountedLatestTurnIndex() {
       let latest = -1;
@@ -339,7 +366,7 @@
       return latest;
     }
 
-    function computeLiveProtectedTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+    function computeLatestBoundaryTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
       const protectedTurns = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
       for (const turn of turns) {
         const index = turnIndexFromId(turnId(turn));
@@ -350,10 +377,15 @@
       return protectedTurns;
     }
 
+    function computeLiveProtectedTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+      return isGenerationActive() ? computeLatestBoundaryTurns(latestIndex, turns) : new Set();
+    }
+
     function isProtectedLiveToolTurn(element, latestIndex = mountedLatestTurnIndex(), protectedTurns = state.liveProtectedTurns) {
       if (!(element instanceof Element)) return true;
       const turn = element.closest(TURN_SELECTOR);
       if (!(turn instanceof Element)) return true;
+      if (!isGenerationActive()) return false;
       if (protectedTurns?.has(turn)) return true;
       const index = turnIndexFromId(turnId(turn));
       if (index < 0 || latestIndex < 0) return true;
@@ -367,7 +399,10 @@
         state.liveProtectedTurns.has(turn) !== nextProtectedTurns.has(turn)
       );
       state.liveProtectedTurns = nextProtectedTurns;
-      for (const turn of changedTurns) state.liveBoundaryRoots.add(turn);
+      for (const turn of changedTurns) {
+        state.liveBoundaryRoots.add(turn);
+        if (state.settings.hideToolEmbeds) scanPreviewSurfaces(turn);
+      }
       return changedTurns;
     }
 
@@ -598,7 +633,10 @@
         return;
       }
       updateLatestTurnKnowledge();
-      const currentLiveTurns = computeLiveProtectedTurns(state.latestTurnIndex);
+      // App load errors keep the latest two-turn safety boundary even after
+      // generation ends; unlike passive tool chrome, a Retry on the newest
+      // response must never be hidden just because the Stop button vanished.
+      const currentLiveTurns = computeLatestBoundaryTurns(state.latestTurnIndex);
       for (const aside of [...state.oldAppLoadErrors]) {
         if (!aside.isConnected || !isAppTemplateFetchErrorCard(aside)) {
           aside.classList.remove('csg-old-app-load-error');
@@ -606,9 +644,10 @@
           if (!aside.isConnected || !isAppErrorShell(aside)) stopOldAppErrorObserver(aside);
           continue;
         }
-        const index = turnIndexFromId(turnId(aside.closest(TURN_SELECTOR)));
+        const turn = aside.closest(TURN_SELECTOR);
+        const index = turnIndexFromId(turnId(turn));
         const canProveOld = index >= 0 && state.latestTurnIndex >= 0 &&
-          !isProtectedLiveToolTurn(aside, state.latestTurnIndex, currentLiveTurns);
+          turn instanceof Element && !currentLiveTurns.has(turn);
         aside.classList.toggle('csg-old-app-load-error', canProveOld);
       }
       state.oldAppStableTurns = routeTurnSnapshot();
@@ -929,6 +968,27 @@
          element.getAttribute('data-csg-preview-state') === 'broken');
     }
 
+    function hidePreviewPresentation(entry, parts, stateName = 'hidden', measuredInlineSize = null) {
+      if (!parts) return;
+      const mountInlineSize = Number.isFinite(measuredInlineSize)
+        ? measuredInlineSize : parts.mount.getBoundingClientRect().width;
+      if (mountInlineSize > 0) parts.mount.style.setProperty('--csg-preview-inline-size', `${mountInlineSize}px`);
+      parts.mount.classList.remove('csg-preview-settling', 'csg-broken-preview');
+      parts.header?.classList.remove('csg-preview-settling', 'csg-broken-preview-header');
+      const preserveLiveLayout = isProtectedLiveToolTurn(parts.mount);
+      parts.mount.classList.toggle('csg-preview-live-layout', preserveLiveLayout);
+      parts.header?.classList.toggle('csg-preview-live-layout', preserveLiveLayout);
+      parts.mount.classList.add('csg-hidden-preview');
+      parts.header?.classList.add('csg-hidden-preview-header');
+      setPreviewState(parts.mount, stateName);
+      setPreviewState(parts.header, stateName);
+      parts.divider?.setAttribute('data-csg-preview-divider', stateName);
+      if (entry) {
+        entry.stableTiny = 0;
+        entry.brokenChecks = 0;
+      }
+    }
+
     function releasePreviewPresentation(entry, parts, preserveNodes = null) {
       // React may replace mount/header/divider nodes while an iframe entry is
       // still alive. Clear presentation from both the previously tracked nodes
@@ -942,14 +1002,14 @@
       const dividers = new Set([entry?.divider, parts?.divider].filter((node) => node instanceof Element));
       for (const mount of mounts) {
         if (preserved.has(mount)) continue;
-        mount.classList.remove('csg-preview-settling', 'csg-broken-preview');
+        mount.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
         setPreviewState(mount);
         mount.style.removeProperty('--csg-collapse-block');
         mount.style.removeProperty('--csg-preview-inline-size');
       }
       for (const header of headers) {
         if (preserved.has(header)) continue;
-        header.classList.remove('csg-preview-settling', 'csg-broken-preview-header');
+        header.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         setPreviewState(header);
         header.style.removeProperty('--csg-collapse-block');
       }
@@ -963,6 +1023,8 @@
     }
 
     const previewResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+      const toClear = new Set();
+      const toHide = new Map();
       for (const resizeEntry of entries) {
         const target = resizeEntry.target;
         const iframe = target instanceof HTMLIFrameElement ? target : state.previewMounts.get(target);
@@ -970,27 +1032,29 @@
         const entry = state.previewSurfaces.get(iframe);
         if (!entry) continue;
         if (!iframe.isConnected || !isPreviewSurfaceIframe(iframe)) {
-          clearPreviewSurface(iframe);
+          toClear.add(iframe);
           continue;
         }
         const parts = previewSurfaceParts(iframe);
-        if (!parts) {
-          clearPreviewSurface(iframe);
+        if (!parts || previewHasFailOpenUi(parts)) {
+          toClear.add(iframe);
           continue;
         }
-        if (previewHasFailOpenUi(parts)) {
-          clearPreviewSurface(iframe);
-          continue;
-        }
-        if (previewReportedHeight(iframe, parts.mount) > 48) {
-          if (entry.timer) clearTimeout(entry.timer);
-          entry.timer = 0;
-          releasePreviewPresentation(entry, parts);
-          continue;
-        }
-        if (!entry.timer && !isBrokenPreviewMount(parts.mount)) {
-          schedulePreviewProbe(iframe, 250);
-        }
+        toHide.set(iframe, { entry, parts });
+      }
+      // Batch every geometry read before any class/style write. ResizeObserver can
+      // deliver iframe+mount entries together; interleaving getBoundingClientRect
+      // with presentation writes would otherwise force repeated layouts.
+      const measured = new Map();
+      for (const [iframe, item] of toHide) {
+        measured.set(iframe, item.parts.mount.getBoundingClientRect().width);
+      }
+      for (const iframe of toClear) clearPreviewSurface(iframe);
+      for (const [iframe, { entry, parts }] of toHide) {
+        if (toClear.has(iframe)) continue;
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = 0;
+        hidePreviewPresentation(entry, parts, 'hidden', measured.get(iframe));
       }
     }) : null;
 
@@ -1046,13 +1110,21 @@
         return;
       }
       if (entry.mount !== parts.mount || entry.header !== parts.header || entry.divider !== parts.divider) {
+        // React can reparent the iframe into a fresh mount while leaving the old
+        // now-empty mount between it and the original divider. Reuse that divider
+        // when it still belongs to the same conversation turn instead of leaving
+        // a thin separator/gap behind after the preview itself is hidden.
+        const reusableDivider = !parts.divider && entry.divider instanceof Element && entry.divider.isConnected &&
+          entry.divider.closest(TURN_SELECTOR) === parts.mount.closest(TURN_SELECTOR)
+          ? entry.divider : null;
         if (entry.mount) {
           previewResizeObserver?.unobserve(entry.mount);
           if (state.previewMounts.get(entry.mount) === iframe) state.previewMounts.delete(entry.mount);
         }
-        entry.mount?.classList.remove('csg-preview-settling', 'csg-broken-preview');
-        entry.header?.classList.remove('csg-preview-settling', 'csg-broken-preview-header');
+        entry.mount?.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
+        entry.header?.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         entry.divider?.removeAttribute('data-csg-preview-divider');
+        if (reusableDivider) parts.divider = reusableDivider;
         setPreviewState(entry.mount);
         setPreviewState(entry.header);
         entry.mount?.style.removeProperty('--csg-preview-inline-size');
@@ -1071,50 +1143,11 @@
         return;
       }
       entry.probes += 1;
-      const height = previewReportedHeight(iframe, parts.mount);
-      if (height > 48) {
-        // Healthy previews stay visible, but remain resize-tracked because some
-        // ChatGPT App surfaces later collapse into the 37px unavailable state.
-        releasePreviewPresentation(entry, parts);
-        return;
-      }
-      if (height <= 0) {
-        if (entry.probes >= 8) clearPreviewSurface(iframe);
-        else schedulePreviewProbe(iframe, 500);
-        return;
-      }
-      // Relative/calc viewport semantics can change after an App mounts. Taking
-      // such a surface out of flow can make percentage descendants unmeasurable,
-      // so unknown units are never classified as broken: fail open visibly.
-      if (previewHasRelativeWrapperHeight(iframe)) {
-        releasePreviewPresentation(entry, parts);
-        return;
-      }
-      entry.stableTiny += 1;
-      if (entry.stableTiny < 2) {
-        schedulePreviewProbe(iframe, 850);
-        return;
-      }
-      const alreadyBroken = parts.mount.getAttribute('data-csg-preview-state') === 'broken';
-      // Capture the mount's in-flow column width before taking it out of flow.
-      // A fixed measured width avoids both shrink-to-fit collapse and future DOM
-      // variants where width:100% would resolve against a wider ancestor.
-      const mountInlineSize = parts.mount.getBoundingClientRect().width;
-      if (mountInlineSize > 0) parts.mount.style.setProperty('--csg-preview-inline-size', `${mountInlineSize}px`);
-      parts.mount.classList.remove('csg-preview-settling');
-      parts.header?.classList.remove('csg-preview-settling');
-      if (!alreadyBroken) {
-        parts.mount.classList.add('csg-broken-preview');
-        parts.header?.classList.add('csg-broken-preview-header');
-        setPreviewState(parts.mount, 'broken');
-        setPreviewState(parts.header, 'broken');
-      }
-      parts.divider?.setAttribute('data-csg-preview-divider', 'broken');
-      // ResizeObserver is the primary recovery path. Keep a bounded heartbeat as
-      // a safety net for browser/layout cases where a 37px iframe later grows
-      // without delivering a reliable resize callback to the extension.
-      entry.brokenChecks += 1;
-      if (entry.brokenChecks < 30) schedulePreviewProbe(iframe, 1000);
+      // hideToolEmbeds is an explicit user choice: every passive Tool/App preview
+      // stays mounted for ChatGPT/React, but is removed from the conversation's
+      // visual flow regardless of whether the iframe is healthy or a tiny fallback.
+      // Retry/Auth/Connect bootstrap UI is handled above and always fails open.
+      hidePreviewPresentation(entry, parts);
     }
 
     function trackPreviewIframe(iframe) {
@@ -1122,7 +1155,6 @@
       const parts = previewSurfaceParts(iframe);
       if (!parts) return;
       let entry = state.previewSurfaces.get(iframe);
-      const isNew = !entry;
       if (!entry) {
         entry = { mount: parts.mount, header: parts.header, divider: parts.divider, timer: 0, stableTiny: 0, probes: 0, brokenChecks: 0 };
         state.previewSurfaces.set(iframe, entry);
@@ -1130,24 +1162,7 @@
         previewResizeObserver?.observe(iframe);
         previewResizeObserver?.observe(parts.mount);
       }
-      if (previewHasFailOpenUi(parts)) {
-        clearPreviewSurface(iframe);
-        return;
-      }
-      if (isNew) {
-        parts.mount.classList.add('csg-preview-settling');
-        parts.header?.classList.add('csg-preview-settling');
-        setPreviewState(parts.mount, 'settling');
-        setPreviewState(parts.header, 'settling');
-        schedulePreviewProbe(iframe, 650);
-        return;
-      }
-      const height = previewReportedHeight(iframe, parts.mount);
-      if (height > 48) {
-        releasePreviewPresentation(entry, parts);
-        return;
-      }
-      if (!entry.timer && !isBrokenPreviewMount(parts.mount)) schedulePreviewProbe(iframe, 150);
+      probePreviewSurface(iframe);
     }
 
     function scanPreviewSurfaces(scanRoot) {
@@ -1884,14 +1899,6 @@
     const AUTO_CONTINUE_REGEX_MAX_GROUPS = 8;
     const AUTO_CONTINUE_SETTLE_MS = 900;
     const AUTO_CONTINUE_MAX_HANDLED = 64;
-    const STOP_GENERATING_SELECTOR = [
-      'button[data-testid="stop-button"]',
-      'button[data-testid="stop-generating-button"]',
-      'button[aria-label="Stop generating" i]',
-      'button[aria-label="Stop response" i]',
-      'button[aria-label*="生成を停止"]',
-      'button[aria-label*="応答を停止"]'
-    ].join(',');
     const COMPOSER_SELECTOR = [
       '#prompt-textarea',
       '[data-testid="composer-text-input"]',
@@ -2309,6 +2316,9 @@
       state.summaryLiveObservedTurns.clear();
       state.summaryBoundaryObserver?.disconnect();
       state.summaryBoundaryRoots.clear();
+      state.summaryGenerationObserver?.disconnect();
+      state.summaryGenerationRoot = null;
+      state.summaryGenerationActive = false;
     }
 
     function refreshSummaryLiveObservation() {
@@ -2382,6 +2392,7 @@
           if (!mutations.some(summaryBoundaryMutationTouchesTurn)) return;
           refreshSummaryLiveObservation();
           bindSummaryBoundaryObserver();
+          bindSummaryGenerationObserver();
         });
       }
       state.summaryBoundaryObserver.disconnect();
@@ -2401,9 +2412,50 @@
       }
     }
 
+    function summaryGenerationObservationRoot() {
+      const stop = document.querySelector(STOP_GENERATING_SELECTOR);
+      const composer = document.querySelector('#prompt-textarea,[data-testid="composer-text-input"],textarea[placeholder*="Message" i],textarea[placeholder*="メッセージ"]');
+      const form = stop?.closest('form') || composer?.closest('form');
+      if (!(form instanceof Element)) return null;
+      return form.parentElement instanceof Element ? form.parentElement : form;
+    }
+
+    function bindSummaryGenerationObserver() {
+      if (!state.settings.enabled || !state.settings.hideToolSummary || needsGeneralMutationScan()) {
+        state.summaryGenerationObserver?.disconnect();
+        state.summaryGenerationRoot = null;
+        state.summaryGenerationActive = false;
+        return;
+      }
+      const root = summaryGenerationObservationRoot();
+      const active = isGenerationActive();
+      state.summaryGenerationActive = active;
+      if (!(root instanceof Element)) return;
+      if (root === state.summaryGenerationRoot && root.isConnected && state.summaryGenerationObserver) return;
+      if (!state.summaryGenerationObserver) {
+        state.summaryGenerationObserver = new MutationObserver(() => {
+          const nextActive = isGenerationActive();
+          const changed = nextActive !== state.summaryGenerationActive;
+          state.summaryGenerationActive = nextActive;
+          if (changed) refreshSummaryLiveObservation();
+          if (!state.summaryGenerationRoot?.isConnected) bindSummaryGenerationObserver();
+        });
+      }
+      state.summaryGenerationObserver.disconnect();
+      state.summaryGenerationRoot = root;
+      state.summaryGenerationObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ['data-testid', 'aria-label']
+      });
+    }
+
     function startSummaryLiveObservation() {
       refreshSummaryLiveObservation();
       bindSummaryBoundaryObserver();
+      bindSummaryGenerationObserver();
     }
 
     function bootstrapRecoveryRoot(element) {
@@ -2424,11 +2476,17 @@
       return placeholder instanceof Element ? placeholder : null;
     }
 
+    function containsStopGeneratingControl(node) {
+      if (!(node instanceof Element)) return false;
+      return node.matches(STOP_GENERATING_SELECTOR) || Boolean(node.querySelector(STOP_GENERATING_SELECTOR));
+    }
+
     const observer = new MutationObserver((mutations) => {
       if (!state.settings.enabled) return;
       const generalMutationScan = needsGeneralMutationScan();
       let removed = false;
       let conversationTurnChanged = false;
+      let generationStateChanged = false;
       const classifiedSelector = '.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live';
 
       // Summary mutations are fed into a bounded idle queue. Never process
@@ -2453,6 +2511,10 @@
         if (mutation.type === 'attributes') {
           const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
           if (!(target instanceof Element)) continue;
+          if (containsStopGeneratingControl(target) ||
+              wasStopGeneratingAttribute(mutation.attributeName, mutation.oldValue)) {
+            generationStateChanged = true;
+          }
           scheduleSummaryMutationRoot(target);
           if (mutation.attributeName === 'data-testid' &&
               (target.matches(TURN_SELECTOR) || String(mutation.oldValue || '').startsWith('conversation-turn-'))) {
@@ -2486,11 +2548,13 @@
         if (state.settings.hideToolSummary && classifiedShell) scheduleScan(classifiedShell);
 
         for (const node of mutation.addedNodes) {
+          if (containsStopGeneratingControl(node)) generationStateChanged = true;
           scheduleSummaryMutationRoot(node);
           noteTurnNode(node);
         }
         for (const node of mutation.removedNodes) {
           if (!(node instanceof Element)) continue;
+          if (containsStopGeneratingControl(node)) generationStateChanged = true;
           removed = true;
           if (node.matches(TURN_SELECTOR) || Boolean(node.querySelector(TURN_SELECTOR))) {
             conversationTurnChanged = true;
@@ -2522,7 +2586,7 @@
       }
 
       if (removed) scheduleDetachedCleanup();
-      if (conversationTurnChanged) scheduleScan();
+      if (conversationTurnChanged || generationStateChanged) scheduleScan();
       if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
     });
 
@@ -2554,6 +2618,7 @@
           subtree: true,
           characterData: true,
           attributes: true,
+          attributeOldValue: true,
           attributeFilter: [
             'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
             'aria-modal', 'aria-label', 'aria-expanded', 'title'

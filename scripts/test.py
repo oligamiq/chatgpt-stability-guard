@@ -24,6 +24,8 @@ def main():
     run(sys.executable, 'scripts/test_loading_indicator.py')
     run(sys.executable, 'scripts/test_auto_continue.py')
     run(sys.executable, 'scripts/test_ui_isolation.py')
+    run(sys.executable, 'scripts/test_generation_completion.py')
+    run(sys.executable, 'scripts/test_summary_generation_completion.py')
     run(sys.executable, 'scripts/test_package.py')
     print('ALL TESTS OK')
 

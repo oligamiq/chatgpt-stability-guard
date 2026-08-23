@@ -81,6 +81,7 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
   <button id="library" class="transition-fixture" data-testid="tool-library-add-button">Add from library</button>
   <pre id="outside-pre">application pre</pre>
 </main>
+<button id="test-stop-generation" data-testid="stop-button" aria-label="Stop answering">Stop</button>
 <section data-testid="conversation-turn-1" data-turn="assistant">
   <div class="agent-turn">
     <div id="old-classless-summary"><span>Tools </span><span>were called</span></div>
@@ -549,11 +550,9 @@ setTimeout(() => {{
     shellBody:physicallyRendered('live-shell-body'),
     realCalledToolPrehideEnabled:document.documentElement.classList.contains('csg-prehide-tool-summary'),
     oldNativeHistoricalHandoff:(() => {{
-      const row=snapshot('old-real-called-tool-row'), natural=naturalBoxHeight('old-real-called-tool-row');
-      return row.classes.includes('csg-tool-summary') && natural>0 &&
-        Math.abs((Number.parseFloat(row.collapseBlock)||0)-natural)<0.5 &&
-        Math.abs(Number.parseFloat(row.marginBlockStart)||0)<0.5 &&
-        Math.abs((Number.parseFloat(row.marginBlockEnd)||0)+natural)<0.5 &&
+      const row=snapshot('old-real-called-tool-row'), shell=snapshot('old-real-called-tool-shell');
+      return row.classes.includes('csg-tool-summary') && row.opacity==='0' &&
+        shell.classes.includes('csg-tool-ui') && shell.position==='absolute' && shell.width===0 && shell.height===0 &&
         ['old-real-called-tool-control','old-real-tool-list-button','old-real-tool-list-icon','old-real-called-tool-label','old-real-called-tool-chevron'].every(zeroRect);
     }})(),
     realCalledToolPreContentNestedPassiveZero:window.__preContentNestedPassiveZero===true,
@@ -563,9 +562,9 @@ setTimeout(() => {{
     unrelatedStatefulPreContentVisible:window.__preContentUnrelatedStatefulVisible===true,
     unrelatedStatefulRemainsActionable:!snapshot('unrelated-stateful-row').classes.some(c=>c.startsWith('csg-tool-summary')||c==='csg-tool-ui') && physicallyRendered('unrelated-stateful-menu'),
     localizedHistoricalHandoff:(() => {{
-      const row=snapshot('old-localized-tool-row'), natural=naturalBoxHeight('old-localized-tool-row');
-      return row.classes.includes('csg-tool-summary') && natural>0 &&
-        Math.abs((Number.parseFloat(row.collapseBlock)||0)-natural)<0.5 &&
+      const row=snapshot('old-localized-tool-row'), shell=snapshot('old-localized-tool-shell');
+      return row.classes.includes('csg-tool-summary') && row.opacity==='0' &&
+        shell.classes.includes('csg-tool-ui') && shell.position==='absolute' && shell.width===0 && shell.height===0 &&
         ['old-localized-list-button','old-localized-list-icon','old-localized-label','old-localized-chevron'].every(zeroRect);
     }})(),
     authorizeSummaryRemainsActionable:!document.getElementById('authorize-details').classList.contains('csg-tool-ui') && physicallyRendered('authorize-summary'),
@@ -703,6 +702,9 @@ setTimeout(() => {{
   document.body.insertAdjacentHTML('beforeend','<section data-testid="conversation-turn-10" data-turn="assistant"><div class="agent-turn">newest assistant turn</div></section>');
 }}, 1350);
 setTimeout(() => {{
+  document.getElementById('test-stop-generation')?.remove();
+}}, 1650);
+setTimeout(() => {{
   const motion=snapshot('live-app-motion');
   const realRow=snapshot('real-called-tool-row');
   const realRowNaturalHeight=naturalBoxHeight('real-called-tool-row');
@@ -710,13 +712,11 @@ setTimeout(() => {{
     recentPlaceholder:!snapshot('dynamic-header-placeholder-body').classes.includes('csg-prehide-tool-block') && snapshot('dynamic-header-placeholder-body').display!=='none',
     tool:!snapshot('live-tool').classes.includes('csg-tool') && physicallyRendered('live-tool'),
     pre:snapshot('live-pre').classes.includes('csg-heavy') && snapshot('live-pre').contentVisibility==='auto',
-    shell:snapshot('live-shell').classes.includes('csg-tool-ui') && snapshot('live-shell').display!=='none',
-    summary:summaryGone('live-tool-summary'),
+    shell:snapshot('live-shell').classes.includes('csg-tool-ui') && snapshot('live-shell').position==='absolute' && zeroRect('live-shell'),
+    summary:snapshot('live-tool-summary').opacity==='0' && !physicallyRendered('live-shell-body'),
     realNativeSummaryCollapsesAfterAging:realRow.classes.includes('csg-tool-summary') &&
-      snapshot('real-called-tool-shell').position!=='absolute' && realRowNaturalHeight>0 &&
-      Math.abs((Number.parseFloat(realRow.collapseBlock)||0)-realRowNaturalHeight)<0.5 &&
-      Math.abs(Number.parseFloat(realRow.marginBlockStart)||0)<0.5 &&
-      Math.abs((Number.parseFloat(realRow.marginBlockEnd)||0)+realRowNaturalHeight)<0.5,
+      snapshot('real-called-tool-shell').classes.includes('csg-tool-ui') &&
+      snapshot('real-called-tool-shell').position==='absolute' && zeroRect('real-called-tool-shell'),
     realNativeSummaryPixelsHidden:realRow.opacity==='0' && realRow.pointerEvents==='none',
     realNativeChildrenZeroAfterAging:['real-tool-list-button','real-tool-list-icon','real-called-tool-label','real-called-tool-chevron'].every(zeroRect),
     weirdShellSettled:snapshot('live-weird-app-shell').classes.includes('csg-tool-ui') && snapshot('live-weird-app-shell').display!=='none',
@@ -738,18 +738,18 @@ setTimeout(() => {{
   document.querySelector('[data-testid="conversation-turn-9"]')?.remove();
 }}, 2150);
 setTimeout(() => {{
-  // Real ChatGPT previews can settle at 37px, get classified as broken, then
-  // later grow to a healthy App surface. Resize recovery must release them.
+  // A passive Tool preview can grow after mount. hideToolEmbeds is explicit, so
+  // growth must not put it back into the conversation flow.
   document.getElementById('preview-late-grow-wrap').style.height='180px';
 }}, 2300);
 setTimeout(() => {{
   // React commonly rewrites className on App wrappers. The durable data state
-  // must keep a settled broken preview hidden even if those CSG classes vanish.
-  document.getElementById('preview-broken')?.classList.remove('csg-broken-preview');
-  document.getElementById('preview-broken-header')?.classList.remove('csg-broken-preview-header');
+  // must keep a hidden preview suppressed even if those CSG classes vanish.
+  document.getElementById('preview-broken')?.classList.remove('csg-hidden-preview');
+  document.getElementById('preview-broken-header')?.classList.remove('csg-hidden-preview-header');
 }}, 2500);
 setTimeout(() => {{
-  // Simulate React reparenting a broken preview iframe into a fresh mount while
+  // Simulate React reparenting a hidden preview iframe into a fresh mount while
   // leaving the old mount connected. Cleanup must detect that the tracked mount
   // no longer contains its iframe; isConnected alone is insufficient.
   const oldMount=document.getElementById('preview-replace');
@@ -767,7 +767,7 @@ setTimeout(() => {{
 setTimeout(() => {{
   // Simulate React replacing only the iframe while reusing the same mount.
   // Detached cleanup for the old iframe must not strip the new iframe's
-  // settling state or unobserve the shared mount.
+  // hidden state or unobserve the shared mount.
   const oldFrame=document.getElementById('preview-iframe-replace-old');
   if (oldFrame) {{
     const fresh=document.createElement('iframe');
@@ -781,7 +781,7 @@ setTimeout(() => {{
 setTimeout(() => {{
   const mount=snapshot('preview-iframe-replace');
   window.__sameMountReplacementProtected =
-    mount.previewState==='settling' && mount.opacity==='0' &&
+    mount.previewState==='hidden' && mount.opacity==='0' && mount.position==='absolute' &&
     document.getElementById('preview-iframe-replace-new')?.isConnected===true;
 }}, 2750);
 setTimeout(() => {{
@@ -793,9 +793,9 @@ setTimeout(() => {{
 }}, 2800);
 setTimeout(() => {{
   window.__attributeReuseLive={{
-    tool:!snapshot('reuse-passive-tool').classes.includes('csg-tool') && snapshot('reuse-passive-tool').display!=='none',
+    tool:snapshot('reuse-passive-tool').classes.includes('csg-tool') && snapshot('reuse-passive-tool').display!=='none',
     placeholder:!snapshot('placeholder-passive').classes.includes('csg-prehide-tool-block') && snapshot('placeholder-passive').display!=='none',
-    actualTailStillLive:physicallyRendered('live-tool') && physicallyRendered('live-app-error')
+    actualTailStillVisible:physicallyRendered('live-tool') && physicallyRendered('live-app-error')
   }};
 }}, 3450);
 setTimeout(() => {{
@@ -843,7 +843,9 @@ setTimeout(() => {{
     nestedMarkdownLoadingPreStillHeavy: states['markdown-loading-pre'].classes.includes('csg-heavy') && states['markdown-loading-pre'].contentVisibility==='auto',
     actionablePreNotLazy: !states['interactive-heavy-pre'].classes.includes('csg-heavy') && states['interactive-heavy-pre'].contentVisibility!=='auto',
     passiveShellHidden: states['passive-shell'].classes.includes('csg-tool-ui') && states['passive-shell'].display!=='none',
-    ariaOnlyLegacySummaryHidden: summaryGone('aria-only-summary') && states['aria-only-shell'].classes.includes('csg-tool-ui'),
+    ariaOnlyLegacySummaryHidden: states['aria-only-shell'].classes.includes('csg-tool-ui') &&
+      states['aria-only-shell'].position==='absolute' && states['aria-only-shell'].width===0 && states['aria-only-shell'].height===0 &&
+      states['aria-only-summary'].opacity==='0',
     retryOnlySummaryFailsOpen: !states['retry-summary-shell'].classes.includes('csg-tool-ui') &&
       states['summary-retry'].display!=='none' && hit['summary-retry'],
     partialSummaryFalsePositivePreserved: !states['partial-summary-shell'].classes.some(c=>c.startsWith('csg-')) &&
@@ -857,54 +859,61 @@ setTimeout(() => {{
     rootSurfaceErrorPlaceholderVisible: !states['root-surface-error-placeholder'].classes.includes('csg-prehide-tool-block') && physicallyRendered('root-surface-error-placeholder'),
     passiveLegacyEmbedPreserved: !states['embed-passive'].classes.includes('csg-tool-embed') && states['embed-passive'].display!=='none',
     appIframeEmbedVisible: !states['embed-app'].classes.includes('csg-tool-embed') && states['embed-app'].display!=='none' && physicallyRendered('embed-app-frame'),
-    brokenPreviewSuppressedWithoutDetach: states['preview-broken'].previewState==='broken' &&
-      states['preview-broken-header'].previewState==='broken' &&
-      !states['preview-broken'].classes.includes('csg-broken-preview') &&
-      !states['preview-broken-header'].classes.includes('csg-broken-preview-header') &&
+    passivePreviewSuppressedWithoutDetach: states['preview-broken'].previewState==='hidden' &&
+      states['preview-broken-header'].previewState==='hidden' &&
       states['preview-broken'].display!=='none' && states['preview-broken'].position==='absolute' && states['preview-broken'].opacity==='0' &&
-      states['preview-broken-header'].position==='absolute' && states['preview-broken-divider'].previewDivider==='broken' && states['preview-broken-divider'].display==='none' &&
-      states['preview-broken'].height>=35 && states['preview-broken-frame'].height>=35 && states['preview-broken'].width>600 &&
-      document.getElementById('preview-broken-frame').isConnected,
-    percentHeightPreviewFailsOpen: states['preview-percent'].previewState==='' && states['preview-percent-header'].previewState==='' &&
-      !states['preview-percent'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview') &&
-      states['preview-percent'].position!=='absolute' && states['preview-percent'].opacity==='1' &&
-      states['preview-percent-divider'].previewDivider==='' && states['preview-percent-divider'].display!=='none' && physicallyRendered('preview-percent-frame'),
-    unrelatedSiblingActionDoesNotReleaseBrokenPreview: states['preview-sibling-guard'].previewState==='broken' &&
+      states['preview-broken-header'].position==='absolute' && states['preview-broken-header'].opacity==='0' &&
+      states['preview-broken'].width===0 && states['preview-broken'].height===0 &&
+      states['preview-broken-header'].width===0 && states['preview-broken-header'].height===0 &&
+      states['preview-broken-divider'].previewDivider==='hidden' && states['preview-broken-divider'].display==='none' &&
+      states['preview-broken-frame'].height>=35 && document.getElementById('preview-broken-frame').isConnected,
+    percentHeightPreviewSuppressed: states['preview-percent'].previewState==='hidden' && states['preview-percent-header'].previewState==='hidden' &&
+      states['preview-percent'].classes.includes('csg-hidden-preview') && states['preview-percent-header'].classes.includes('csg-hidden-preview-header') &&
+      states['preview-percent'].position==='absolute' && states['preview-percent'].opacity==='0' &&
+      states['preview-percent-divider'].previewDivider==='hidden' && states['preview-percent-divider'].display==='none' && document.getElementById('preview-percent-frame').isConnected,
+    unrelatedSiblingActionDoesNotReleaseHiddenPreview: states['preview-sibling-guard'].previewState==='hidden' &&
       states['preview-sibling-guard'].position==='absolute' && states['preview-sibling-guard'].opacity==='0' &&
-      states['preview-sibling-guard-divider'].previewDivider==='broken' && states['preview-sibling-guard-divider'].display==='none' &&
+      states['preview-sibling-guard-divider'].previewDivider==='hidden' && states['preview-sibling-guard-divider'].display==='none' &&
       physicallyRendered('preview-unrelated-connect') && hit['preview-unrelated-connect'],
-    reactMountReplacementClearsStaleState: Boolean(window.__recycledPreviewMount) &&
+    reactMountReplacementClearsStaleStateAndHidesReplacement: Boolean(window.__recycledPreviewMount) &&
       window.__recycledPreviewMount.isConnected===true &&
       !window.__recycledPreviewMount.contains(document.getElementById('preview-replace-frame')) &&
       !window.__recycledPreviewMount.classList.contains('csg-preview-settling') &&
       !window.__recycledPreviewMount.classList.contains('csg-broken-preview') &&
+      !window.__recycledPreviewMount.classList.contains('csg-hidden-preview') &&
       !window.__recycledPreviewMount.hasAttribute('data-csg-preview-state') &&
       !window.__recycledPreviewMount.style.getPropertyValue('--csg-preview-inline-size') &&
-      !document.getElementById('preview-replace-new').style.getPropertyValue('--csg-preview-inline-size') &&
-      states['preview-replace-new'].position!=='absolute' && states['preview-replace-new'].opacity==='1' && states['preview-replace-new'].height>=170 &&
-      states['preview-replace-frame'].height>=170 && states['preview-replace-header'].position!=='absolute' &&
-      states['preview-replace-divider'].previewDivider==='' && states['preview-replace-divider'].display!=='none',
-    sameMountIframeReplacementKeepsSettling: window.__sameMountReplacementProtected===true,
-    sameMountIframeReplacementRecovers:
-      !states['preview-iframe-replace'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview') &&
-      states['preview-iframe-replace'].previewState==='' &&
-      states['preview-iframe-replace'].position!=='absolute' && states['preview-iframe-replace'].opacity==='1' &&
-      states['preview-iframe-replace'].height>=170 && states['preview-iframe-replace-new'].height>=170 &&
-      states['preview-iframe-replace-divider'].previewDivider==='' && states['preview-iframe-replace-divider'].display!=='none' &&
+      states['preview-replace-new'].previewState==='hidden' && states['preview-replace-new'].classes.includes('csg-hidden-preview') &&
+      Boolean(document.getElementById('preview-replace-new').style.getPropertyValue('--csg-preview-inline-size')) &&
+      states['preview-replace-new'].position==='absolute' && states['preview-replace-new'].opacity==='0' &&
+      states['preview-replace-new'].width===0 && states['preview-replace-new'].height===0 &&
+      states['preview-replace-frame'].height>=170 && states['preview-replace-header'].position==='absolute' && states['preview-replace-header'].opacity==='0' &&
+      states['preview-replace-header'].width===0 && states['preview-replace-header'].height===0 &&
+      states['preview-replace-divider'].previewDivider==='hidden' && states['preview-replace-divider'].display==='none',
+    sameMountIframeReplacementStaysHidden: window.__sameMountReplacementProtected===true &&
+      states['preview-iframe-replace'].previewState==='hidden' && states['preview-iframe-replace'].classes.includes('csg-hidden-preview') &&
+      states['preview-iframe-replace'].position==='absolute' && states['preview-iframe-replace'].opacity==='0' &&
+      states['preview-iframe-replace'].width===0 && states['preview-iframe-replace'].height===0 && states['preview-iframe-replace-new'].height>=170 &&
+      states['preview-iframe-replace-divider'].previewDivider==='hidden' && states['preview-iframe-replace-divider'].display==='none' &&
       document.getElementById('preview-iframe-replace-new').isConnected,
-    grownPreviewRevealed: !states['preview-success'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview') &&
-      !states['preview-success-header'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview-header') &&
-      states['preview-success'].display!=='none' && states['preview-success'].position!=='absolute' && states['preview-success'].opacity==='1' && states['preview-success'].height>=150 &&
-      states['preview-success-divider'].previewDivider==='' && states['preview-success-divider'].display!=='none',
-    brokenThenGrownPreviewRecovers: !states['preview-late-grow'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview') &&
-      !states['preview-late-grow-header'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview-header') &&
-      states['preview-late-grow'].previewState==='' && states['preview-late-grow'].position!=='absolute' && states['preview-late-grow'].opacity==='1' && states['preview-late-grow'].height>=170 &&
-      states['preview-late-grow-frame'].height>=170 && states['preview-late-grow-divider'].previewDivider==='' && states['preview-late-grow-divider'].display!=='none',
-    grownThenShrunkPreviewSuppressed: states['preview-shrink'].classes.includes('csg-broken-preview') &&
-      states['preview-shrink-header'].classes.includes('csg-broken-preview-header') &&
+    grownPreviewStaysHidden: states['preview-success'].previewState==='hidden' && states['preview-success'].classes.includes('csg-hidden-preview') &&
+      states['preview-success-header'].classes.includes('csg-hidden-preview-header') &&
+      states['preview-success'].display!=='none' && states['preview-success'].position==='absolute' && states['preview-success'].opacity==='0' &&
+      states['preview-success'].width===0 && states['preview-success'].height===0 &&
+      states['preview-success-header'].width===0 && states['preview-success-header'].height===0 &&
+      states['preview-success-divider'].previewDivider==='hidden' && states['preview-success-divider'].display==='none' &&
+      document.getElementById('preview-success-frame').isConnected,
+    hiddenThenGrownPreviewStaysHidden: states['preview-late-grow'].previewState==='hidden' && states['preview-late-grow'].classes.includes('csg-hidden-preview') &&
+      states['preview-late-grow-header'].classes.includes('csg-hidden-preview-header') &&
+      states['preview-late-grow'].position==='absolute' && states['preview-late-grow'].opacity==='0' &&
+      states['preview-late-grow'].width===0 && states['preview-late-grow'].height===0 &&
+      states['preview-late-grow-frame'].height>=170 && states['preview-late-grow-divider'].previewDivider==='hidden' && states['preview-late-grow-divider'].display==='none',
+    grownThenShrunkPreviewStaysHidden: states['preview-shrink'].previewState==='hidden' && states['preview-shrink'].classes.includes('csg-hidden-preview') &&
+      states['preview-shrink-header'].classes.includes('csg-hidden-preview-header') &&
       states['preview-shrink'].display!=='none' && states['preview-shrink'].position==='absolute' && states['preview-shrink'].opacity==='0' &&
-      states['preview-shrink-divider'].previewDivider==='broken' && states['preview-shrink-divider'].display==='none' &&
-      states['preview-shrink'].height>=35 && states['preview-shrink-frame'].height>=35,
+      states['preview-shrink'].width===0 && states['preview-shrink'].height===0 &&
+      states['preview-shrink-divider'].previewDivider==='hidden' && states['preview-shrink-divider'].display==='none' &&
+      states['preview-shrink-frame'].height>=35,
     errorPreviewFailsOpen: !states['preview-error'].classes.some(c=>c.startsWith('csg-preview')||c==='csg-broken-preview') &&
       states['preview-error'].display!=='none' && states['preview-error'].opacity==='1' && physicallyRendered('preview-error-surface') && hit['preview-retry'],
     interactiveEmbedVisible: !states['embed-action'].classes.includes('csg-tool-embed') && states['embed-action'].display!=='none',
@@ -926,9 +935,10 @@ setTimeout(() => {{
     staleHighNumericTailProtected: physicallyRendered('live-tool') && physicallyRendered('live-app-error'),
     rewindHeaderBodyProtected: !states['dynamic-header-placeholder-body'].classes.includes('csg-prehide-tool-block') && physicallyRendered('dynamic-header-placeholder-body'),
     rewindLiveToolVisible: !states['live-tool'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-tool'),
-    rewindLivePreNative: !states['live-pre'].classes.includes('csg-heavy') && states['live-pre'].contentVisibility!=='auto' && physicallyRendered('live-pre'),
-    rewindLiveShellVisible: !states['live-shell'].classes.includes('csg-tool-ui') && physicallyRendered('live-shell'),
-    rewindLiveSummaryGone: summaryGone('live-tool-summary') && physicallyRendered('live-shell-body'),
+    rewindLivePreNative: states['live-pre'].classes.includes('csg-heavy') && states['live-pre'].contentVisibility==='auto' && physicallyRendered('live-pre'),
+    rewindLiveShellVisible: states['live-shell'].classes.includes('csg-tool-ui') && states['live-shell'].position==='absolute' &&
+      states['live-shell'].width===0 && states['live-shell'].height===0 && states['live-shell'].opacity==='0',
+    rewindLiveSummaryGone: states['live-tool-summary'].opacity==='0' && !physicallyRendered('live-shell-body'),
     rewindInteractiveShellSafe: !states['live-interactive-shell'].classes.includes('csg-tool-ui') &&
       summaryGone('live-interactive-summary') && physicallyRendered('live-interactive-body') && physicallyRendered('live-shell-connect'),
     rewindLiveEmbedVisible: !states['live-embed'].classes.some(c=>c.startsWith('csg-')) && physicallyRendered('live-embed'),
