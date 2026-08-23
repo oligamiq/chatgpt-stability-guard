@@ -58,9 +58,8 @@
   };
 
   chrome.storage.local.get(
-    { privacyConsent: false, privacyConsentVersion: 0, settings: DEFAULTS, uiLanguage: 'auto' },
-    ({ privacyConsent, privacyConsentVersion, settings, uiLanguage }) => {
-      if (privacyConsent !== true || privacyConsentVersion !== 1) return;
+    { settings: DEFAULTS, uiLanguage: 'auto' },
+    ({ settings, uiLanguage }) => {
       const merged = { ...DEFAULTS, ...(settings || {}) };
       state.uiLanguage = ['auto', 'ja', 'en'].includes(uiLanguage) ? uiLanguage : 'auto';
       state.active = merged.enabled !== false && merged.showRecentOnly === true;

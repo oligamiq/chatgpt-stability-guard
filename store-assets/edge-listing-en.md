@@ -4,20 +4,21 @@
 Stability Guard for ChatGPT
 
 ## Short description
-Reduce rendering churn in long ChatGPT web chats by hiding or deferring selected reasoning, tool UI, code/log, and older turns.
+Reduce lag and clutter in long ChatGPT chats by hiding old turns, Thinking, tool traces, stale errors, and other heavy UI locally.
 
 ## Detailed description
-Stability Guard for ChatGPT is an unofficial browser extension focused on reducing rendering overhead in long ChatGPT web conversations.
+Long ChatGPT threads can become sluggish and visually crowded as old turns, Thinking/reasoning, tool traces, embedded apps, errors, code, and logs accumulate. Stability Guard for ChatGPT reduces that rendering overhead locally without deleting your ChatGPT conversation history.
 
-Features include:
-- Hide reasoning / Thinking UI
-- Hide MCP / tool trace bodies and tool summary rows
-- Hide embedded tool UI and loading placeholders
-- Hide stale `Failed to fetch template` errors while keeping the latest-turn error visible
-- Dim or compact long trace blocks
-- Defer off-screen code/log rendering
-- Optionally show only the most recent N exchanges (off by default; N=3)
-- Optionally defer older conversation turns
+Everything runs in your browser on `chatgpt.com`: no conversation uploads, ads, analytics, telemetry, developer backend, remote configuration, or remote code.
+
+Highlights:
+- Optionally keep only the most recent N exchanges visible (off by default; N=3)
+- Hide Thinking / reasoning UI
+- Hide passive MCP / tool traces and tool-summary rows
+- Preserve live App, Connect, authentication, and Retry controls
+- Hide stale `Failed to fetch template` errors while keeping current-turn errors visible
+- Suppress confirmed broken preview remnants without blocking healthy or still-loading App UI
+- Dim or compact long trace blocks and defer off-screen code/log rendering
 - Show counts of hidden or deferred elements
 - Toggle each optimization independently
 

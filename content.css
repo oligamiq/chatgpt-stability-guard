@@ -14,10 +14,161 @@ html.csg-reduce-motion :where(.csg-thinking, .csg-tool) :where(
 }
 
 html.csg-hide-thinking .csg-thinking,
-html.csg-hide-tools .csg-tool,
-html.csg-hide-tool-summary .csg-tool-ui,
-html.csg-hide-tool-embeds .csg-tool-embed,
 html.csg-hide-old-app-errors .csg-old-app-load-error {
+  display: none !important;
+}
+
+/* Tool containers can become App lifecycle hosts later. Never detach the
+   container itself; only remove an already-classified inert trace body. */
+html.csg-hide-tools .csg-tool > .csg-trace-body {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  margin-block-start: 0 !important;
+  margin-block-end: calc(-1 * var(--csg-collapse-block, 0px)) !important;
+}
+
+/* Live/protected summary chrome is pixel-invisible but retains its exact layout
+   box. This preserves any App visibility/size bootstrap contract. */
+html.csg-hide-tool-summary .csg-tool-summary-live {
+  opacity: 0 !important;
+  color: transparent !important;
+}
+
+/* Never display:none a ChatGPT tool/App lifecycle shell. App content can mount
+   into these nodes later, including when an old turn is revisited. Remove only
+   standalone label nodes after they leave the protected live window. */
+html.csg-hide-tool-summary .csg-tool-summary:not([class~="group/tool-message"]):not(details):not(summary) {
+  opacity: 0 !important;
+  color: transparent !important;
+  pointer-events: none !important;
+  /* Keep the measured row box itself stable while neutralizing its flow. This
+     lets redundant child controls become true 0x0 without over-collapsing the
+     following UI by another row height. */
+  box-sizing: border-box !important;
+  block-size: var(--csg-collapse-block, auto) !important;
+  min-block-size: var(--csg-collapse-block, 0px) !important;
+  max-block-size: var(--csg-collapse-block, none) !important;
+  margin-block-start: 0 !important;
+  margin-block-end: calc(-1 * var(--csg-collapse-block, 0px)) !important;
+}
+
+html.csg-hide-tool-summary .csg-tool-summary :is(button,[role="button"]):has(button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+)),
+html.csg-hide-tool-summary .csg-tool-summary button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+),
+html.csg-hide-tool-summary .csg-tool-summary button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+) > svg,
+html.csg-hide-tool-summary .csg-tool-summary button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+) ~ :is(span, svg) {
+  display: inline-block !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+/* Preview surfaces bootstrap while fully laid out. During a short settle window
+   keep them mounted and measurable but visually quiet. A preview that remains a
+   tiny fallback surface is later moved out of layout without display:none. */
+html.csg-hide-tool-embeds .csg-preview-settling,
+html.csg-hide-tool-embeds [data-csg-preview-state="settling"] {
+  opacity: 0 !important;
+}
+
+html.csg-hide-tool-embeds .csg-broken-preview,
+html.csg-hide-tool-embeds .csg-broken-preview-header,
+html.csg-hide-tool-embeds [data-csg-preview-state="broken"] {
+  /* Remove the broken preview from flex layout without changing the App/iframe's
+     own measurable box. This also removes flex-gap whitespace that negative
+     margins cannot cancel, while ResizeObserver can still detect later growth. */
+  position: absolute !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  margin: 0 !important;
+}
+
+html.csg-hide-tool-embeds .no-scrollbar.csg-broken-preview,
+html.csg-hide-tool-embeds .no-scrollbar[data-csg-preview-state="broken"] {
+  /* JS snapshots the actual in-flow chat-column width before absolute
+     positioning. If React ever strips that custom property, these declarations
+     simply become invalid rather than expanding the hidden App to viewport width. */
+  inline-size: var(--csg-preview-inline-size) !important;
+  max-inline-size: var(--csg-preview-inline-size) !important;
+  box-sizing: border-box !important;
+}
+
+html.csg-hide-tool-embeds [data-csg-preview-divider="broken"] {
+  display: none !important;
+}
+
+/* Disclosure controls may be owned by React and may be required to reach a
+   live App/Auth surface. Keep their hit box/state intact, but make every visual
+   part of the redundant label invisible. Non-interactive label wrappers use
+   .csg-tool-summary and are removed outright. */
+html.csg-hide-tool-summary .csg-tool-summary-stealth {
+  opacity: 0 !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  letter-spacing: -1em !important;
+}
+
+html.csg-hide-tool-summary .csg-tool-summary-stealth :where(svg,[class*="chevron"],[class*="arrow"]) {
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html.csg-hide-tool-summary summary.csg-tool-summary-stealth {
+  display: block !important;
+  inline-size: 20px !important;
+  block-size: 20px !important;
+  min-inline-size: 20px !important;
+  min-block-size: 20px !important;
+  max-inline-size: 20px !important;
+  max-block-size: 20px !important;
+  list-style: none !important;
+}
+
+html.csg-hide-tool-summary summary.csg-tool-summary-stealth::marker {
+  content: '' !important;
+  font-size: 0 !important;
+}
+
+html.csg-hide-tool-summary summary.csg-tool-summary-stealth::-webkit-details-marker {
   display: none !important;
 }
 
@@ -64,7 +215,6 @@ html.csg-show-recent-only .csg-recent-scrollhost::-webkit-scrollbar {
 #csg-recent-scrollbar-thumb:active { cursor: grabbing; }
 #csg-recent-scrollbar-thumb[hidden] { display: none !important; }
 
-html.csg-lazy-heavy [data-testid^="conversation-turn-"] pre,
 html.csg-lazy-heavy .csg-heavy {
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;

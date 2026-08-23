@@ -20,6 +20,13 @@ h2 { margin:0 0 8px; font-size:11px; letter-spacing:.04em; text-transform:upperc
 .setting input[type="checkbox"]:checked::after { transform:translateX(14px); }
 .row { display:flex; align-items:center; min-height:36px; gap:8px; font-size:12px; }
 .row input { width:66px; margin-left:auto; padding:3px 5px; }
+.pattern-config { margin:0 2px 8px; padding:7px 8px; border-radius:8px; background:color-mix(in srgb,CanvasText 5%,Canvas); }
+.pattern-row,.pattern-field { display:flex; align-items:center; gap:8px; min-height:34px; font-size:11px; }
+.pattern-row span,.pattern-field span { flex:0 0 66px; opacity:.72; }
+.pattern-row select,.pattern-field input { min-width:0; flex:1; min-height:30px; padding:4px 6px; border:1px solid color-mix(in srgb,CanvasText 18%,transparent); border-radius:7px; background:Canvas; color:CanvasText; }
+.pattern-field input[aria-invalid="true"] { border-color:color-mix(in srgb,red 55%,CanvasText); }
+.pattern-config[data-disabled="true"] { opacity:.5; }
+.pattern-config .hint { margin:4px 0 0; }
 .hint { margin:0 2px 7px; font-size:10px; line-height:1.45; opacity:.58; }
 .danger { border-left:3px solid color-mix(in srgb,orange 50%,Canvas); padding-left:10px; }
 .notice,.compat-notice { margin:10px 14px 2px; padding:9px 10px; border-radius:9px; font-size:11px; }
@@ -27,16 +34,6 @@ h2 { margin:0 0 8px; font-size:11px; letter-spacing:.04em; text-transform:upperc
 .notice span { display:block; margin-bottom:7px; }
 .notice button { width:100%; }
 .compat-notice { border:1px solid color-mix(in srgb,orange 30%,transparent); background:color-mix(in srgb,orange 7%,Canvas); line-height:1.45; }
-.consent { margin:12px 14px 4px; padding:14px; border:1px solid color-mix(in srgb,Highlight 35%,transparent); border-radius:10px; background:color-mix(in srgb,Highlight 5%,Canvas); }
-.consent h1 { margin:0 0 8px; font-size:15px; }
-.consent p { margin:0 0 8px; font-size:12px; }
-.consent ul { margin:7px 0 11px 19px; padding:0; font-size:11px; opacity:.78; }
-.consent-check { display:flex; gap:8px; align-items:flex-start; margin:8px 0 10px; font-size:12px; }
-.consent-check input { margin-top:2px; }
-.consent button { width:100%; margin-top:6px; }
-.consent .primary { background:Highlight; color:HighlightText; border-color:Highlight; font-weight:600; }
-.consent .primary:disabled { opacity:.42; cursor:not-allowed; }
-.policy-link { display:block; margin-top:10px; font-size:11px; text-align:center; color:LinkText; }
 .section-title { display:flex; align-items:center; justify-content:space-between; }
 .section-title h2 { margin-bottom:7px; }
 #statsState { font-size:10px; opacity:.58; }
@@ -57,12 +54,8 @@ button:hover:not(:disabled) { background:color-mix(in srgb,CanvasText 11%,Canvas
 .switch input:checked + span::after { transform:translateX(17px); }
 body.disabled main { opacity:.5; }
 body.disabled .stats,body.disabled .buttons,body.disabled .notice { opacity:1; }
-body.needs-consent #settingsMain,body.needs-consent #pendingNotice { display:none; }
-body.needs-consent .master { opacity:.35; pointer-events:none; }
 footer { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:7px 12px; margin-top:12px; font-size:9px; opacity:.58; }
 footer a { color:inherit; }
-.link-button { min-height:0; padding:0; border:0; border-radius:0; background:none; color:inherit; font:inherit; text-decoration:underline; }
-.link-button:hover { background:none !important; }
 
 @media (max-width: 430px), (pointer: coarse) {
   body { width:100vw; min-width:0; font-size:14px; }
@@ -70,13 +63,15 @@ footer a { color:inherit; }
   .header-actions { gap:10px; }
   #uiLanguage { min-height:40px; max-width:108px; font-size:14px; }
   main { padding:4px max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
-  .notice,.compat-notice,.consent { margin-left:max(14px, env(safe-area-inset-left)); margin-right:max(14px, env(safe-area-inset-right)); }
+  .notice,.compat-notice { margin-left:max(14px, env(safe-area-inset-left)); margin-right:max(14px, env(safe-area-inset-right)); }
   .setting { min-height:50px; }
   .setting input[type="checkbox"] { width:40px; height:24px; }
   .setting input[type="checkbox"]::after { width:18px; height:18px; }
   .setting input[type="checkbox"]:checked::after { transform:translateX(16px); }
   .row { min-height:48px; }
   .row input { width:76px; min-height:40px; font-size:16px; }
+  .pattern-row,.pattern-field { min-height:46px; font-size:13px; }
+  .pattern-row select,.pattern-field input { min-height:40px; font-size:16px; }
   button { min-height:44px; padding:8px 10px; }
   .buttons { grid-template-columns:1fr; }
   .switch span { width:46px; height:28px; }

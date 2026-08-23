@@ -1,5 +1,5 @@
 {
   "extensionName": { "message": "Stability Guard for ChatGPT" },
-  "extensionDescription": { "message": "Reduces rendering churn in long ChatGPT chats. Built for the current ChatGPT web UI; site updates may require an extension update." },
+  "extensionDescription": { "message": "Reduce lag and clutter in long ChatGPT chats by hiding old turns, Thinking, tool traces, stale errors, and other heavy UI locally." },
   "actionTitle": { "message": "Stability Guard for ChatGPT" }
 }

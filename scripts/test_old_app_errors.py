@@ -28,6 +28,15 @@ def error_card(text="Failed to fetch template"):
     )
 
 
+def current_error_card(text="Failed to fetch template"):
+    return (
+        '<div class="flex border-token-surface-error/15 text-token-text-error">'
+        '<div><div class="font-bold text-token-text-error">Error loading app</div>'
+        f'<div class="text-token-text-error">{html.escape(text)}</div></div>'
+        '<button type="button">Retry</button></div>'
+    )
+
+
 def normal_card_with_text():
     return '<aside class="surface-error"><div>Failed to fetch template</div></aside>'
 
@@ -42,9 +51,7 @@ const __settings = {settings_json};
 window.chrome = {{
   runtime: {{ onMessage: {{ addListener() {{}} }} }},
   storage: {{ local: {{ get(defaults, cb) {{
-    if (Object.prototype.hasOwnProperty.call(defaults, 'privacyConsent'))
-      cb({{privacyConsent: true, privacyConsentVersion: 1}});
-    else cb({{settings: __settings}});
+    cb(Object.assign({{}}, defaults, {{settings: __settings, uiLanguage: 'en'}}));
   }} }} }}
 }};
 </script>
@@ -105,6 +112,28 @@ def main():
         [
             {"name": "old", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": True},
             {"name": "latest", "selector": '[data-testid="conversation-turn-3"] aside', "hidden": False},
+        ],
+    )
+    run_case(
+        "current-div-error-hidden-latest-visible",
+        make_turn(0, '<div>user</div>') +
+        make_turn(1, current_error_card()) +
+        make_turn(2, '<div>user newer</div>') +
+        make_turn(3, current_error_card()),
+        [
+            {"name": "current-old", "selector": '[data-testid="conversation-turn-1"] > div', "hidden": True},
+            {"name": "current-latest", "selector": '[data-testid="conversation-turn-3"] > div', "hidden": False},
+        ],
+    )
+    run_case(
+        "japanese-old-error-hidden-latest-visible",
+        make_turn(0, '<div>user</div>') +
+        make_turn(1, error_card('テンプレートの取得に失敗しました')) +
+        make_turn(2, '<div>user newer</div>') +
+        make_turn(3, error_card('テンプレートの取得に失敗しました')),
+        [
+            {"name": "old-ja", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": True},
+            {"name": "latest-ja", "selector": '[data-testid="conversation-turn-3"] aside', "hidden": False},
         ],
     )
     run_case(
@@ -205,7 +234,7 @@ setTimeout(() => {
   document.body.appendChild(document.createElement('div'));
 }, 120);
 """,
-        check_delay=2600,
+        check_delay=3500,
     )
     run_case(
         "feature-disabled",

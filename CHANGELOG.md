@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.0.18 — 2026-08-23
+
+- Removed the first-run data-processing consent screen and consent gate; the extension now starts immediately with the saved or default settings after installation or update.
+- Removed consent-version/timestamp storage and the revoke-consent control while keeping the Privacy page available from the popup.
+- Updated privacy, Store/reviewer documentation, validation, and regression fixtures to match the no-consent-gate flow.
+
+## 1.0.17 — 2026-08-22
+
+- Fixed the current ChatGPT MCP `Called tool` / `ツールが呼び出されました` row, including localized tool-list controls and the independently sized tool-list SVG; label, button, icon, chevron, and passive row spacing now reach zero visible geometry without detaching React-owned DOM.
+- Added document-start structural suppression for the known passive MCP row while keeping App/bootstrap/action-bearing variants fail-open and interactive.
+- Kept healthy mounted App surfaces and mount points rendered; only confirmed tiny broken previews are removed from layout, with measured-width preservation plus ResizeObserver/bounded-probe recovery when a 37px preview later grows into a working App.
+- Added support for the current DIV-based `Error loading app` / `Failed to fetch template` card and continue to hide only provably old errors while preserving Retry on the live two-turn boundary.
+- Replaced periodic/full-conversation Tool-summary work with event-driven live-boundary observers and a resumable historical fallback sweep capped at 256 text nodes per idle slice; Markdown subtrees remain excluded.
+- Removed obsolete placeholder/legacy embed observers and dead `.csg-tool-embed` bookkeeping so document-start code only supplies first-paint summary state and the recent-conversation loader.
+- Expanded regression coverage for Japanese/English, aria-label-only and split/classless summaries, 600+ text-node historical turns, Retry/Connect/Auth controls, React preview-node replacement, broken-to-healthy preview growth, and both legacy/current App error DOMs.
+- Validated the release in a logged-in Chrome for Testing session against the long real conversation, including 233 Tool-summary rows and live ChatGPT App previews.
+
+## 1.0.16 — 2026-08-19
+
+- Removed remaining `ツールが呼び出されました` / `Tools were called` chrome even when ChatGPT renders it without tool-specific classes, splits the label across multiple spans, or streams fragments incrementally.
+- Kept detection scoped to conversation UI and explicitly excluded Markdown content so literal user/assistant text is never hidden.
+- Stopped mutating React-owned disclosure state: interactive `button`/`summary` controls stay mounted and clickable while only their redundant visual label/arrow is suppressed.
+- Prevented label detection from growing into sibling App/template/output UI, including loaders, `.no-scrollbar` surfaces, Retry/Connect/Auth controls, tables, canvases, iframes, and other app surfaces.
+- Added a bounded MutationObserver fast path and incremental long-conversation sweep, with regression coverage for classless, split-span, one-character-per-span, and incrementally streamed labels.
+
+## 1.0.15 — 2026-08-19
+
+- Made `ツールが呼び出されました` / `Tools were called` fully invisible, including arrow/marker chrome and non-standard div/span+SVG renderings, without hiding the live App/bootstrap parent DOM.
+- Zero-sized required disclosure controls while preserving App loaders, placeholders, Connect/Add/Auth/Retry UI, and automatically opening collapsed disclosure containers only when required UI would otherwise remain hidden.
+- Kept passive settled tool summaries/shells aggressively removable with `display: none` while live/loading App UI remains fail-open to avoid `Failed to fetch template`.
+- Added bounded DOM text scanning for tool/action/bootstrap detection to avoid long-conversation main-thread stalls on very large tool payloads.
+- Expanded regression coverage for native/custom disclosures, zero-size arrows, collapsed App loaders, custom React shells, and non-standard summary DOM.
+
+## 1.0.14 — 2026-08-19
+
+- Restored aggressive removal of completed passive tool summaries, shells, embeds, and placeholders while keeping active App UI fail-open.
+- Prevented Stability Guard from hiding App/template bootstrap UI, including placeholders that transition from hidden/passive state into loading state.
+- Preserved Connect/Add/Auth/Retry controls and prevented active application UI from receiving `content-visibility: auto` or other passive-trace optimizations.
+- Added recovery for loading/actionable rich embeds that later become passive, plus Japanese App template error detection.
+- Added regression coverage for `Failed to fetch template`, loading-to-ready transitions, nested Markdown false positives, and actionable controls inside code/pre blocks.
+
 ## 1.0.13 — 2026-08-19
 
 - Fixed live App/Tool protection when turns age out, rewind, or React reuses an existing conversation-turn DOM node.

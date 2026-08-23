@@ -1,7 +1,7 @@
-# Microsoft Edge Add-ons submission — 1.0.13
+# Microsoft Edge Add-ons submission — 1.0.18
 
 ## Package
-- ZIP: `dist/stability-guard-for-chatgpt-1.0.13.zip`
+- ZIP: `dist/stability-guard-for-chatgpt-1.0.18.zip`
 - Manifest: MV3
 - Runtime permission: `storage` only
 - Content-script scope: `https://chatgpt.com/*`
@@ -26,7 +26,7 @@
 Reduce rendering overhead in long ChatGPT web conversations by locally identifying and optionally hiding, compacting, or deferring selected ChatGPT UI elements.
 
 ## Privacy — permission justification
-`storage`: Stores only extension settings, privacy-consent version, and consent timestamp in extension-local storage.
+`storage`: Stores only extension settings and UI language preference in extension-local storage.
 
 `https://chatgpt.com/*`: Content scripts inspect the rendered ChatGPT DOM locally to apply the user-selected rendering optimizations. The extension does not access cookies, authentication tokens, browsing history, or network traffic.
 
@@ -41,8 +41,8 @@ Reduce rendering overhead in long ChatGPT web conversations by locally identifyi
 
 ## Reviewer notes
 1. Install the extension and open `https://chatgpt.com/`.
-2. Open the extension action and accept the local-processing disclosure.
-3. Reload the ChatGPT tab.
+2. Open the extension action.
+3. Reload the ChatGPT tab if it was already open when the extension was installed or updated.
 4. Open a long conversation and toggle rendering options from the extension action.
 5. Optionally enable “recent N exchanges only”; N defaults to 3 and the feature defaults to off.
 6. On Android/mobile, verify that the action UI fits the viewport and recent-N scrolling follows browser chrome / soft-keyboard viewport changes.

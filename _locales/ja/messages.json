@@ -1,5 +1,5 @@
 {
   "extensionName": { "message": "Stability Guard for ChatGPT" },
-  "extensionDescription": { "message": "長大なChatGPT会話の描画負荷を軽減します。現在のChatGPT Web UI向けで、サイト更新時には拡張の更新が必要になる場合があります。" },
+  "extensionDescription": { "message": "長大なChatGPT会話の重さと表示の混雑を軽減。古いターン、Thinking、ツールUI、古いエラーなどを端末内だけで選択的に抑制します。" },
   "actionTitle": { "message": "Stability Guard for ChatGPT" }
 }

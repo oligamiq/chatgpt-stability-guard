@@ -76,7 +76,7 @@ html,body{{margin:0;height:100%;}}
 .gap{{height:900px;}}
 {CONTENT_CSS}
 </style><script>
-window.chrome={{storage:{{local:{{get(_defaults,cb){{cb({{privacyConsent:true,privacyConsentVersion:1,settings:{{enabled:true,showRecentOnly:true,recentExchanges:{n}}}}});}}}}}}}};
+window.chrome={{storage:{{local:{{get(defaults,cb){{cb(Object.assign({{}},defaults,{{uiLanguage:'en',settings:{{enabled:true,showRecentOnly:true,recentExchanges:{n}}}}}));}}}}}}}};
 </script></head><body>
 <div id="scroll" class="group/scroll-root"><div id="thread">{body}</div></div>
 <script>{before_js}</script>

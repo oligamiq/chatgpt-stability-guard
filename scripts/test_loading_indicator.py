@@ -30,15 +30,10 @@ class QuietHandler(SimpleHTTPRequestHandler):
 def chrome_stub(n=3):
     return f'''<script>
 window.chrome={{storage:{{local:{{get(defaults,cb){{
-  if(Object.prototype.hasOwnProperty.call(defaults,'privacyConsent')){{
-    const value={{privacyConsent:true,privacyConsentVersion:1}};
-    if(Object.prototype.hasOwnProperty.call(defaults,'settings')){{
-      value.settings={{enabled:true,showRecentOnly:true,recentExchanges:{n},prehideToolPlaceholders:false}};
-    }}
-    cb(value);
-  }} else {{
-    cb({{settings:{{enabled:true,showRecentOnly:true,recentExchanges:{n},prehideToolPlaceholders:false}}}});
-  }}
+  cb(Object.assign({{}},defaults,{{
+    uiLanguage:'en',
+    settings:{{enabled:true,showRecentOnly:true,recentExchanges:{n},prehideToolPlaceholders:false}}
+  }}));
 }}}}}}}};
 </script>'''
 

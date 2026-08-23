@@ -30,7 +30,7 @@
   <p>本拡張機能は、会話内容やWebサイトコンテンツを独自の永続ストレージへ保存せず、開発者または第三者のサーバーへ送信しません。</p>
 
   <h3>ローカル設定</h3>
-  <p>本拡張機能は <code>chrome.storage.local</code> を使用して、各機能の有効・無効、表示する直近の会話数、プライバシー同意バージョン、同意日時などの設定をブラウザ内に保存します。これらの設定は開発者運営サーバーへ送信されません。</p>
+  <p>本拡張機能は <code>chrome.storage.local</code> を使用して、各機能の有効・無効、表示する直近の会話数、UI言語などの設定をブラウザ内に保存します。これらの設定は開発者運営サーバーへ送信されません。</p>
 
   <h2>2. 外部通信とリモートコード</h2>
   <p>本拡張機能には、解析、広告、テレメトリ、リモート設定、アカウントシステム、開発者運営バックエンドはありません。本拡張機能自身からユーザーデータを外部へ送信するネットワークリクエストを開始しません。</p>
@@ -42,9 +42,8 @@
   <h2>4. ストアのデータ利用要件</h2>
   <p>本拡張機能は、配布先ストアで要求されるユーザーデータ保護・限定利用の要件に従い、上記の単一目的以外にユーザーデータを利用しません。</p>
 
-  <h2>5. 保持、同意、削除</h2>
+  <h2>5. 保持と削除</h2>
   <p>ChatGPT上のWebサイトコンテンツや会話内容は、表示中のページ内で一時的に処理されるだけで、本拡張機能によって保持されません。ローカル設定は、ユーザーが変更・消去するか、本拡張機能を削除するまでブラウザプロファイル内に保持されます。</p>
-  <p>ユーザーは拡張機能のポップアップからローカルなページ処理への同意を取り消すことができます。ChatGPTタブを検出できる場合は、撤回時にそのタブを再読み込みし、撤回済み状態でDOM処理を停止します。</p>
 
   <h2>6. 権限</h2>
   <p><code>storage</code> 権限はローカル設定を保存するために使用します。ホストアクセスおよびcontent scriptは <code>https://chatgpt.com/*</code> のみに限定し、上記の表示最適化を行うために使用します。</p>
@@ -67,7 +66,7 @@
     <p>The extension does not persist conversation content or website content in its own storage and does not transmit that content to the developer or to third-party servers.</p>
 
     <h3>Local settings</h3>
-    <p>The extension uses <code>chrome.storage.local</code> to store settings such as enabled features, the number of recent conversation exchanges to display, the privacy-consent version, and the consent timestamp. These settings are not transmitted to a developer-operated server.</p>
+    <p>The extension uses <code>chrome.storage.local</code> to store settings such as enabled features, the number of recent conversation exchanges to display, and the UI language. These settings are not transmitted to a developer-operated server.</p>
 
     <h2>2. Network activity and remote code</h2>
     <p>The extension has no analytics, advertising, telemetry, remote configuration, account system, or developer-operated backend. It does not initiate network requests that transmit user data externally.</p>
@@ -79,9 +78,8 @@
     <h2>4. Store data-use requirements</h2>
     <p>The extension follows the user-data protection and limited-use requirements of its distribution stores and does not use user data for purposes outside the single purpose described above.</p>
 
-    <h2>5. Retention, consent, and deletion</h2>
+    <h2>5. Retention and deletion</h2>
     <p>Website content and conversations on ChatGPT are processed transiently in the displayed page and are not retained by the extension. Local settings remain in the browser profile until changed, cleared, or the extension is removed.</p>
-    <p>Users can revoke consent for local page processing from the extension popup. When a ChatGPT tab is detected, the extension reloads that tab so DOM processing stops under the revoked consent state.</p>
 
     <h2>6. Permissions</h2>
     <p>The <code>storage</code> permission is used for local settings. Host access and content scripts are limited to <code>https://chatgpt.com/*</code> and are used only to provide the display optimizations described above.</p>

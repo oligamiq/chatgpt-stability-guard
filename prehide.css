@@ -1,5 +1,134 @@
-.csg-prehide-tool-block {
-  display: none !important;
+/* First-paint fast path for the real ChatGPT MCP disclosure DOM. Keep the
+   tool shell mounted and in normal flow, but remove only its redundant native
+   summary row when the shell has no App/lifecycle surface. This avoids having
+   to classify ChatGPT's outer wrapper <button>, which may itself contain the
+   icon-only "Open tool call list" button. */
+html.csg-prehide-tool-summary [class~="group/tool-message"]:not(:has(
+  .no-scrollbar, iframe, canvas, video, audio, table, picture, object, embed, img,
+  svg:not([aria-hidden="true"]), [role="application"], [role="region"], [role="progressbar"],
+  aside[class*="surface-error"], .text-token-text-error,
+  [data-testid*="app"], [data-testid*="widget"], [data-testid*="artifact"]
+)) > :is(span, div, button).block.relative[class~="text-token-text-secondary"]:has(
+  button[aria-label="Open tool call list" i],
+  button[aria-label="ツール呼び出しリストを開く"],
+  button[type="button"][aria-label][data-state="closed"]:not([aria-haspopup]) + span + svg[aria-hidden="true"],
+  button[type="button"][aria-label][data-state="open"]:not([aria-haspopup]) + span + svg[aria-hidden="true"]
+):not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth) {
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* The dedicated list button, its icon, and the adjacent label/chevron are true
+   0x0 during the passive first-paint fast path. Once content.js marks the row
+   live/stealth/historical, this selector hands ownership to the JS state CSS. */
+html.csg-prehide-tool-summary [class~="group/tool-message"]:not(:has(
+  .no-scrollbar, iframe, canvas, video, audio, table, picture, object, embed, img,
+  svg:not([aria-hidden="true"]), [role="application"], [role="region"], [role="progressbar"],
+  aside[class*="surface-error"], .text-token-text-error,
+  [data-testid*="app"], [data-testid*="widget"], [data-testid*="artifact"]
+)) > :is(span, div, button).block.relative[class~="text-token-text-secondary"]:has(
+  button[aria-label="Open tool call list" i],
+  button[aria-label="ツール呼び出しリストを開く"],
+  button[type="button"][aria-label][data-state="closed"]:not([aria-haspopup]) + span + svg[aria-hidden="true"],
+  button[type="button"][aria-label][data-state="open"]:not([aria-haspopup]) + span + svg[aria-hidden="true"]
+):not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth) button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+),
+html.csg-prehide-tool-summary [class~="group/tool-message"]:not(:has(
+  .no-scrollbar, iframe, canvas, video, audio, table, picture, object, embed, img,
+  svg:not([aria-hidden="true"]), [role="application"], [role="region"], [role="progressbar"],
+  aside[class*="surface-error"], .text-token-text-error,
+  [data-testid*="app"], [data-testid*="widget"], [data-testid*="artifact"]
+)) > :is(span, div, button).block.relative[class~="text-token-text-secondary"]:has(
+  button[aria-label="Open tool call list" i],
+  button[aria-label="ツール呼び出しリストを開く"],
+  button[type="button"][aria-label][data-state="closed"]:not([aria-haspopup]) + span + svg[aria-hidden="true"],
+  button[type="button"][aria-label][data-state="open"]:not([aria-haspopup]) + span + svg[aria-hidden="true"]
+):not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth) button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+) > svg,
+html.csg-prehide-tool-summary [class~="group/tool-message"]:not(:has(
+  .no-scrollbar, iframe, canvas, video, audio, table, picture, object, embed, img,
+  svg:not([aria-hidden="true"]), [role="application"], [role="region"], [role="progressbar"],
+  aside[class*="surface-error"], .text-token-text-error,
+  [data-testid*="app"], [data-testid*="widget"], [data-testid*="artifact"]
+)) > :is(span, div, button).block.relative[class~="text-token-text-secondary"]:has(
+  button[aria-label="Open tool call list" i],
+  button[aria-label="ツール呼び出しリストを開く"],
+  button[type="button"][aria-label][data-state="closed"]:not([aria-haspopup]) + span + svg[aria-hidden="true"],
+  button[type="button"][aria-label][data-state="open"]:not([aria-haspopup]) + span + svg[aria-hidden="true"]
+):not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth) button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"],
+  [type="button"][aria-label][data-state="closed"],
+  [type="button"][aria-label][data-state="open"]
+) ~ :is(span, svg) {
+  display: inline-block !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+/* App/action-bearing variants keep native geometry; still suppress only the
+   redundant list icon/label pixels. */
+html.csg-prehide-tool-summary button:not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth):is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"]
+) {
+  opacity: 0 !important;
+  color: transparent !important;
+}
+
+/* App/action/live variants keep the native tool-list icon geometry. The whole
+   redundant summary row is pixel-invisible, but preserving these dimensions is
+   part of the lifecycle-safe handoff once content.js owns the row. */
+html.csg-prehide-tool-summary button:is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"]
+) > svg {
+  opacity: 0 !important;
+}
+
+html.csg-prehide-tool-summary button:not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth):is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"]
+) ~ span,
+html.csg-prehide-tool-summary button:not(.csg-tool-summary):not(.csg-tool-summary-live):not(.csg-tool-summary-stealth):is(
+  [aria-label="Open tool call list" i],
+  [aria-label="ツール呼び出しリストを開く"]
+) ~ svg {
+  opacity: 0 !important;
+  color: transparent !important;
 }
 
 #csg-recent-loading {

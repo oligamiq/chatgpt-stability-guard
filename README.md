@@ -1,6 +1,8 @@
 # Stability Guard for ChatGPT
 
-長大なChatGPT Web会話で、Thinking・tool UI・コード/ログ・古いターンなどの描画負荷を抑えるManifest V3 Chrome拡張。
+長大なChatGPT Web会話の重さと表示の混雑を軽減するManifest V3 Chrome拡張。古いターン、Thinking / reasoning、tool trace、壊れたAppプレビューや古いエラー、code / logなどを端末内だけで選択的に抑制し、ChatGPT上の会話履歴そのものは削除しない。
+
+A local-only Manifest V3 extension for reducing lag and clutter in long ChatGPT conversations by selectively suppressing old turns, Thinking/reasoning, tool traces, stale app errors, broken preview remnants, and other heavy UI without deleting chat history.
 
 > **互換性に関する重要事項**
 > この拡張は、現在のChatGPT Web UIのDOM/属性構造に合わせて実装されている。ChatGPT側のサイト更新でDOMやUI構造が変わると、検出・非表示・プレースホルダ抑制の一部または全部が一時的に動作しなくなる場合がある。その場合は拡張側の更新が必要。
@@ -25,12 +27,10 @@
 
 ## プライバシー
 
-初回有効化前に、`chatgpt.com` の描画済みページ内容を端末内で処理することを明示して同意を求める。同意するまで会話DOMの走査は開始しない。
-
 - 会話内容を外部送信しない
 - 会話内容を拡張ストレージへ保存しない
 - 解析、広告、テレメトリ、リモート設定、開発者バックエンドなし
-- 設定・同意状態のみ `chrome.storage.local` に保存
+- 設定・UI言語のみ `chrome.storage.local` に保存
 
 詳細: [PRIVACY.md](PRIVACY.md)
 
@@ -40,8 +40,7 @@
 2. `chrome://extensions` または `edge://extensions` を開く。
 3. デベロッパーモードをON。
 4. 「パッケージ化されていない拡張機能を読み込む / Load unpacked」でこのフォルダを選ぶ。
-5. 拡張ポップアップでデータ処理の説明を読み、同意する。
-6. ChatGPTタブを再読み込みする。
+5. ChatGPTタブを再読み込みする。
 
 **Load unpackedは選択したフォルダを実体として参照するため、読込後にそのフォルダを削除・移動しないこと。**
 

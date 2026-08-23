@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 import json
 import subprocess
 import sys
@@ -18,14 +18,64 @@ out = DIST / f'stability-guard-for-chatgpt-{version}.zip'
 store_manifest = dict(manifest)
 store_manifest.pop('key', None)
 
-files = [
-    'content.js','recent-window.js','content.css','prehide.js','prehide.css',
-    'popup.html','popup.css','popup.js','privacy.html','privacy.css','privacy.js',
-    'icons/icon16.png','icons/icon32.png','icons/icon48.png','icons/icon128.png',
-    '_locales/en/messages.json','_locales/ja/messages.json'
-]
-with ZipFile(out, 'w', ZIP_DEFLATED) as z:
-    z.writestr('manifest.json', json.dumps(store_manifest, ensure_ascii=False, indent=2) + '\n')
+def manifest_files(m):
+    out = set()
+
+    def add(value):
+        if isinstance(value, str) and value and not value.startswith(("http://", "https://", "*://")):
+            out.add(value.lstrip("/"))
+
+    action = m.get("action") or {}
+    add(action.get("default_popup"))
+    for value in (action.get("default_icon") or {}).values():
+        add(value)
+    for value in (m.get("icons") or {}).values():
+        add(value)
+    for entry in m.get("content_scripts") or []:
+        for key in ("js", "css"):
+            for value in entry.get(key) or []:
+                add(value)
+    background = m.get("background") or {}
+    add(background.get("service_worker"))
+    for value in background.get("scripts") or []:
+        add(value)
+    add(m.get("options_page"))
+    add((m.get("options_ui") or {}).get("page"))
+    add(m.get("devtools_page"))
+    add((m.get("side_panel") or {}).get("default_path"))
+    for value in (m.get("chrome_url_overrides") or {}).values():
+        add(value)
+    for value in (m.get("sandbox") or {}).get("pages") or []:
+        add(value)
+    for entry in m.get("web_accessible_resources") or []:
+        for value in entry.get("resources") or []:
+            if not any(ch in value for ch in "*?["):
+                add(value)
+    return out
+
+
+# Manifest-declared resources are collected automatically so a future manifest
+# change cannot silently produce an archive missing its new script/page/icon.
+files = manifest_files(manifest)
+# These pages/resources are reached from extension UI rather than the manifest.
+files.update({'popup.css', 'popup.js', 'privacy.html', 'privacy.css', 'privacy.js'})
+# Ship every source locale, not only the current default locale.
+files.update(str(path.relative_to(ROOT)) for path in (ROOT / '_locales').glob('*/messages.json'))
+files = sorted(files)
+
+
+# Normalize ZIP metadata so identical source bytes always produce identical archives.
+ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+def write_entry(z, rel, data):
+    info = ZipInfo(rel, ZIP_EPOCH)
+    info.compress_type = ZIP_DEFLATED
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    z.writestr(info, data)
+
+with ZipFile(out, 'w', compression=ZIP_DEFLATED, compresslevel=9) as z:
+    write_entry(z, 'manifest.json', (json.dumps(store_manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
     for rel in files:
-        z.write(ROOT / rel, rel)
+        write_entry(z, rel, (ROOT / rel).read_bytes())
 print(out)

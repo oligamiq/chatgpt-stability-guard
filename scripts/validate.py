@@ -41,6 +41,21 @@ for rel in ['content.js', 'popup.js']:
           f'{rel} must default stale app-load error filtering to ON')
 check('id="hideOldAppLoadErrors"' in (ROOT / 'popup.html').read_text(),
       'popup.html missing hideOldAppLoadErrors control')
+for rel in ['content.js', 'popup.js']:
+    text = (ROOT / rel).read_text()
+    check(re.search(r'autoContinueIncomplete:\s*false', text) is not None,
+          f'{rel} must default autoContinueIncomplete to OFF')
+popup_html_text = (ROOT / 'popup.html').read_text()
+check('id="autoContinueIncomplete"' in popup_html_text,
+      'popup.html missing autoContinueIncomplete control')
+check('id="autoContinuePatternMode"' in popup_html_text and 'id="autoContinuePattern"' in popup_html_text,
+      'popup.html missing auto-continue pattern controls')
+for rel in ['content.js', 'popup.js']:
+    text = (ROOT / rel).read_text()
+    check(re.search(r"autoContinuePatternMode:\s*'glob'", text) is not None,
+          f'{rel} must default autoContinuePatternMode to glob')
+    check("autoContinuePattern: '*未完成*'" in text,
+          f'{rel} must default autoContinuePattern to *未完成*')
 check('csg-old-app-load-error' in (ROOT / 'content.css').read_text(),
       'content.css missing stale app-load error hide selector')
 
@@ -63,7 +78,14 @@ for rel in ['content.js','recent-window.js','prehide.js','popup.js','privacy.js'
     text = (ROOT / rel).read_text()
     for token in ['eval(', 'new Function', 'XMLHttpRequest', 'WebSocket(', 'fetch(']:
         check(token not in text, f'{rel} contains disallowed/remote-capable token: {token}')
-    check('privacyConsent' in text if rel not in ['popup.js','privacy.js'] else True, f'{rel} missing privacy consent gate')
+    if rel == 'content.js':
+        check("chrome.storage.local.remove?.(['privacyConsent', 'privacyConsentVersion', 'privacyConsentAt'])" in text,
+              'content.js missing legacy consent-metadata cleanup')
+        check('privacyConsent !==' not in text and 'privacyConsentVersion !==' not in text and
+              'privacyConsent:' not in text and 'privacyConsentVersion:' not in text,
+              'content.js still uses legacy consent metadata as a runtime gate')
+    else:
+        check('privacyConsent' not in text, f'{rel} still contains legacy privacy consent gating')
 
 for rel in ['popup.html','privacy.html']:
     text = (ROOT / rel).read_text()
@@ -89,6 +111,9 @@ popup_js = (ROOT / 'popup.js').read_text()
 privacy_html = (ROOT / 'privacy.html').read_text()
 check('id="uiLanguage"' in popup_html and 'value="ja"' in popup_html and 'value="en"' in popup_html,
       'popup language selector must provide Japanese and English')
+check('consentPanel' not in popup_html and 'revokeConsent' not in popup_html and
+      'acceptConsent' not in popup_js and 'privacyConsent' not in popup_js,
+      'popup still contains legacy first-run consent UI or logic')
 check("uiLanguage: 'auto'" in popup_js and "const COPY =" in popup_js,
       'popup.js missing persistent Japanese/English localization')
 check('id="privacyJa"' in privacy_html and 'id="privacyEn"' in privacy_html and 'privacy.js' in privacy_html,
@@ -153,4 +178,4 @@ print('VALIDATION OK')
 print(' version:', manifest['version'])
 print(' scope: https://chatgpt.com/* only')
 print(' permissions: storage only')
-print(' privacy consent gate: present')
+print(' privacy: local-only processing, no first-use consent gate')

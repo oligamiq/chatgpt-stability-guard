@@ -11,7 +11,7 @@ python3 scripts/test.py
 
 Upload only:
 
-`dist/stability-guard-for-chatgpt-1.0.13.zip`
+`dist/stability-guard-for-chatgpt-1.0.18.zip`
 
 The packaging script removes the local development `key` from the Store ZIP. After the first Dashboard upload, use the Store item's public key for local development if you want the unpacked build to share the Store item ID.
 
@@ -22,7 +22,7 @@ Required assets prepared in `store-assets/`:
 - `icon-128.png` — 128x128 padded Chrome Web Store icon
 - `edge-logo-300.png` — 300x300 Microsoft Edge Add-ons listing logo
 - `promo-440x280.png` — 440x280 promotional image
-- `screenshot-1-1280x800.png` — first-run disclosure screenshot
+- `screenshot-1-1280x800.png` — settings / compatibility overview screenshot
 - `screenshot-2-1280x800.png` — settings / compatibility screenshot
 - `screenshot-3-1280x800.png` — long-thread controls, including recent-N view (N defaults to 3)
 - `marquee-1400x560.png` — optional marquee promotional image
@@ -31,6 +31,20 @@ Required assets prepared in `store-assets/`:
 - `edge-listing-ja.md` / `edge-listing-en.md` — browser-neutral Microsoft Edge Add-ons listing copy
 
 The extension package itself includes 16/32/48/128 px PNG icons under `icons/`. Upload `promo-video-15s.mp4` to a YouTube account controlled by the publisher, then paste that video URL into the Store listing field.
+
+### Chrome Web Store listing configuration
+
+- Category: **Tools**. Do not use Accessibility unless the extension is specifically positioned as disability-access software.
+- Locales: fill both **English** and **Japanese** in the Store Listing language selector. `_locales/en` and `_locales/ja` are included in the package, so both listing locales are available.
+- English copy: `store-assets/listing-en.md`
+- Japanese copy: `store-assets/listing-ja.md`
+- Homepage URL: `https://github.com/oligamiq/chatgpt-stability-guard`
+- Support URL: `https://github.com/oligamiq/chatgpt-stability-guard/issues`
+- Privacy policy: `https://oligamiq.github.io/chatgpt-stability-guard/`
+- Keep the short description benefit-first: long-chat lag/clutter first, then old turns / Thinking / tool UI / stale errors and local-only processing.
+- The current screenshots are safe setup/settings captures, but they do not demonstrate the long-chat benefit well. Before the next listing refresh, replace at least one with a sanitized before/after or long-thread screenshot showing the actual reduction in tool/reasoning clutter.
+
+Chrome Web Store listing metadata is edited in the Developer Dashboard; the Web Store API uploads/publishes packages but does not replace this Dashboard listing workflow.
 
 ## 3. Single purpose
 
@@ -44,7 +58,7 @@ All features in the extension directly support this one purpose.
 
 ### `storage`
 
-> Stores only extension settings, privacy-consent version, and consent timestamp locally in the browser profile.
+> Stores only extension settings and UI language preference locally in the browser profile.
 
 ### `https://chatgpt.com/*` content-script access
 
@@ -67,7 +81,7 @@ Conservative privacy disclosure guidance:
 - Remote transmission: **No developer-operated transmission**.
 - Limited Use certification: certify only after verifying the final Dashboard wording matches the behavior documented in `PRIVACY.md`.
 
-The first-run popup provides an in-product disclosure and requires affirmative consent before DOM processing starts.
+The popup links to the bundled privacy policy, and the Store listing discloses that rendered ChatGPT page content is processed locally.
 
 ## 6. Compatibility disclosure
 
@@ -91,12 +105,11 @@ Suggested review instructions:
 
 1. Install the extension and open `https://chatgpt.com/`.
 2. Open the extension popup.
-3. Read and accept the local data-processing disclosure.
-4. Reload the ChatGPT tab.
-5. Open a conversation containing reasoning/tool activity or a long code block.
-6. Open the popup to toggle rendering options and inspect hidden/deferred counts.
+3. Reload the ChatGPT tab if it was already open when the extension was installed or updated.
+4. Open a conversation containing reasoning/tool activity or a long code block.
+5. Open the popup to toggle rendering options and inspect hidden/deferred counts.
    The “stale app loading errors” option hides structured `Failed to fetch template` cards only when their conversation turn is not the latest turn.
-7. Optionally enable “recent N exchanges only”; its default N is 3. The extension keeps React-managed turn nodes measurable, bounds user scrolling to the recent-N semantic window, and shows a dedicated recent-range scrollbar.
+6. Optionally enable “recent N exchanges only”; its default N is 3. The extension keeps React-managed turn nodes measurable, bounds user scrolling to the recent-N semantic window, and shows a dedicated recent-range scrollbar.
 8. Settings intentionally take effect after page reload.
 
 No special account credentials are provided by the extension. Some ChatGPT UI elements only appear when the user's ChatGPT account/session produces those features.
