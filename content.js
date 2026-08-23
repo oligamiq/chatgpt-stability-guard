@@ -857,11 +857,21 @@
       );
     }
 
+    function isSummaryOnlyStructuralToolShell(shell) {
+      if (!(shell instanceof Element) || !shell.matches('[class~="group/tool-message"]')) return false;
+      if (hasActionableUi(shell, true) || hasActiveAppBootstrapUi(shell) || hasAppSurfaceUi(shell)) return false;
+      const label = boundedElementText(shell, 181, 24);
+      return Boolean(label && label.length <= 180 && isExactToolSummaryLabel(label));
+    }
+
     function isPassiveStructuralToolShell(shell, latestTurnIndex) {
-      return isConversationTurnScoped(shell) &&
-        !isProtectedLiveToolTurn(shell, latestTurnIndex) &&
-        shell.matches('[class~="group/tool-message"]') &&
-        !hasActionableUi(shell, true) &&
+      if (!isConversationTurnScoped(shell) || !shell.matches('[class~="group/tool-message"]')) return false;
+      // A live summary-only shell is safe to take out of flex flow. Keep every
+      // other live shell in flow because React may already be rendering real
+      // output there. If App/action/bootstrap UI appears later, mutation
+      // classification fails open immediately and removes csg-tool-ui.
+      if (isProtectedLiveToolTurn(shell, latestTurnIndex) && !isSummaryOnlyStructuralToolShell(shell)) return false;
+      return !hasActionableUi(shell, true) &&
         !hasActiveAppBootstrapUi(shell) &&
         !hasAppSurfaceUi(shell);
     }
@@ -872,7 +882,11 @@
     }
 
     const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"]';
-    const PREVIEW_TITLE_RE = /^ui:\/\/[^/]+\/[^?#]*preview(?:[/?#]|$)/i;
+    // ChatGPT tool rich UI uses ui://<tool>/<route> titles. Do not key hiding to
+    // route names such as file-preview: config-editor and future tool routes use
+    // the same mount/header/divider structure and are also covered by
+    // hideToolEmbeds. Ordinary iframes without a ui:// title still fail open.
+    const PREVIEW_TITLE_RE = /^ui:\/\/[^/?#]+(?:\/[^?#]*)?(?:[?#].*)?$/i;
     const PREVIEW_RETRY_RE = /(?:\bretry\b|再試行)/i;
 
     function isPreviewSurfaceIframe(iframe) {
@@ -894,6 +908,15 @@
       };
     }
 
+    function previewSiblingHasAppError(scope) {
+      if (!(scope instanceof Element)) return false;
+      const surfaceError = scope.matches('aside[class*="surface-error"],[class*="surface-error"]') ||
+        Boolean(scope.querySelector('aside[class*="surface-error"],[class*="surface-error"]'));
+      if (surfaceError) return true;
+      const textError = scope.matches('.text-token-text-error') || Boolean(scope.querySelector('.text-token-text-error'));
+      return textError && hasAppTemplateFetchErrorText(stableElementText(scope));
+    }
+
     function previewHasFailOpenUi(parts) {
       if (!parts) return true;
       const { mount, header } = parts;
@@ -906,20 +929,18 @@
            sibling instanceof Element && hops < 3;
            sibling = sibling.nextElementSibling, hops += 1) {
         const isAppBoundary = sibling.matches('[class~="group/tool-message"],.no-scrollbar,[data-testid*="tool"],[data-testid*="app"]');
-        const explicitError = !isAppBoundary &&
-          (sibling.matches('aside[class*="surface-error"],.text-token-text-error') ||
-           Boolean(sibling.querySelector('aside[class*="surface-error"],.text-token-text-error')));
+        const explicitError = !isAppBoundary && previewSiblingHasAppError(sibling);
         const controls = [];
         if (sibling.matches(ACTIONABLE_UI_SELECTOR)) controls.push(sibling);
         controls.push(...sibling.querySelectorAll(ACTIONABLE_UI_SELECTOR));
         const retryCard = !isAppBoundary &&
-          controls.some((control) => PREVIEW_RETRY_RE.test(boundedControlLabel(control, 181)));
+          controls.some((control) => PREVIEW_RETRY_RE.test(boundedControlLabel(control, 181))) &&
+          APP_ERROR_RETRY_RE.test(stableElementText(sibling));
         if (explicitError || retryCard) local.push(sibling);
         if (isAppBoundary || explicitError || retryCard || boundedElementText(sibling, 81, 12) || controls.length) break;
       }
       for (const scope of local) {
-        if (scope.matches('aside[class*="surface-error"],.text-token-text-error') ||
-            scope.querySelector('aside[class*="surface-error"],.text-token-text-error')) return true;
+        if (previewSiblingHasAppError(scope)) return true;
         const controls = [];
         if (scope.matches(ACTIONABLE_UI_SELECTOR)) controls.push(scope);
         controls.push(...scope.querySelectorAll(ACTIONABLE_UI_SELECTOR));
@@ -1064,20 +1085,16 @@
       if (entry?.timer) clearTimeout(entry.timer);
       previewResizeObserver?.unobserve(iframe);
 
-      // React can replace only the iframe while reusing the same mount/header/
-      // divider. trackPreviewIframe(newIframe) then makes the mount point at the
-      // new entry before detached cleanup of the old iframe runs. Never let the
-      // old cleanup unobserve or strip presentation from nodes now owned by the
-      // replacement entry.
-      const replacementIframe = entry?.mount ? state.previewMounts.get(entry.mount) : null;
-      const replacementEntry = replacementIframe instanceof HTMLIFrameElement && replacementIframe !== iframe
-        ? state.previewSurfaces.get(replacementIframe)
-        : null;
-      const preserveNodes = new Set([
-        replacementEntry?.mount,
-        replacementEntry?.header,
-        replacementEntry?.divider
-      ].filter((node) => node instanceof Element));
+      // React can reuse any subset of mount/header/divider nodes while replacing
+      // the iframe and/or mount. Never let cleanup of an old entry strip state
+      // from a DOM node that is already owned by any other tracked preview.
+      const preserveNodes = new Set();
+      for (const [otherIframe, otherEntry] of state.previewSurfaces) {
+        if (otherIframe === iframe || !otherEntry) continue;
+        for (const node of [otherEntry.mount, otherEntry.header, otherEntry.divider]) {
+          if (node instanceof Element) preserveNodes.add(node);
+        }
+      }
 
       if (entry?.mount && !preserveNodes.has(entry.mount)) {
         previewResizeObserver?.unobserve(entry.mount);
@@ -1435,6 +1452,7 @@
     function applyToolSummaryPlan(plan) {
       if (!plan) return;
       const { marker, target, mode } = plan;
+      const structuralShell = target.closest?.('[class~="group/tool-message"]');
       if (target !== marker) {
         unmarkToolSummary(marker);
         unmarkToolSummaryStealth(marker);
@@ -1444,12 +1462,17 @@
         unmarkToolSummary(target);
         unmarkToolSummaryStealth(target);
         unmarkToolSummaryLive(target);
+        if (structuralShell instanceof Element) unmarkToolChrome(structuralShell);
         return;
       }
       if (mode === 'live') {
         unmarkToolSummary(target);
         unmarkToolSummaryStealth(target);
         markToolSummaryLive(target);
+        if (structuralShell instanceof Element) {
+          if (isSummaryOnlyStructuralToolShell(structuralShell)) markToolChrome(structuralShell, target);
+          else unmarkToolChrome(structuralShell);
+        }
         return;
       }
       if (mode === 'stealth') {
@@ -1591,6 +1614,14 @@
         }
 
         const shell = element.closest('[class~="group/tool-message"],details');
+        // Fail open synchronously when a previously summary-only shell starts
+        // growing real App/action UI. Waiting for the idle classifier can leave
+        // a fresh loader/Connect/Retry surface clipped inside the 0x0 shell for
+        // hundreds of milliseconds, which is long enough to break App bootstrap.
+        if (shell instanceof Element && shell.classList.contains('csg-tool-ui') &&
+            (hasActionableUi(shell, true) || hasActiveAppBootstrapUi(shell) || hasAppSurfaceUi(shell))) {
+          unmarkToolChrome(shell);
+        }
         // A complete generic/classless label in a small local wrapper is safe to
         // classify immediately. Also inspect direct children when React inserts
         // a complete wrapper containing {summary, body} in one mutation.

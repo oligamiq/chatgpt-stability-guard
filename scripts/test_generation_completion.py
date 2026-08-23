@@ -32,9 +32,9 @@ globalThis.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:
 {CONTENT_JS}
 function snap(id){{const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);return{{w:r.width,h:r.height,position:s.position,opacity:s.opacity,display:s.display,visibility:s.visibility,classes:[...e.classList]}}}}
 function visible(id){{const x=snap(id);return x.w>0&&x.h>0&&x.display!=='none'&&x.visibility!=='hidden'&&Number(x.opacity)>0}}
-setTimeout(()=>{{const shell=snap('shell'),row=snap('row'),preview=snap('preview');window.active={{stop:!!document.getElementById('stop'),shellLive:!shell.classes.includes('csg-tool-ui')&&shell.position!=='absolute'&&shell.w>0&&shell.h>0,rowLive:row.classes.includes('csg-tool-summary-live')&&row.opacity==='0',previewLive:preview.classes.includes('csg-preview-live-layout')&&preview.position==='absolute'&&preview.opacity==='0'&&preview.w>0&&preview.h>=170,retry:visible('retry'),stackH:snap('stack').h}}}},600);
+setTimeout(()=>{{const shell=snap('shell'),row=snap('row'),preview=snap('preview');window.active={{stop:!!document.getElementById('stop'),shellZeroLive:shell.classes.includes('csg-tool-ui')&&shell.position==='absolute'&&shell.w===0&&shell.h===0,rowLive:row.classes.includes('csg-tool-summary-live')&&row.opacity==='0',previewLive:preview.classes.includes('csg-preview-live-layout')&&preview.position==='absolute'&&preview.opacity==='0'&&preview.w>0&&preview.h>=170,retry:visible('retry'),stackH:snap('stack').h}}}},600);
 setTimeout(()=>document.getElementById('stop')?.setAttribute('aria-label','Send message'),700);
-setTimeout(()=>{{const shell=snap('shell'),row=snap('row'),preview=snap('preview');window.done={{stopGone:!document.querySelector('button[aria-label="Stop answering" i]'),shellZero:shell.classes.includes('csg-tool-ui')&&shell.position==='absolute'&&shell.opacity==='0'&&shell.w===0&&shell.h===0,rowHistorical:row.classes.includes('csg-tool-summary')&&!row.classes.includes('csg-tool-summary-live')&&row.opacity==='0',controlsZero:snap('list').w===0&&snap('list').h===0,previewZero:preview.classes.includes('csg-hidden-preview')&&!preview.classes.includes('csg-preview-live-layout')&&preview.position==='absolute'&&preview.opacity==='0'&&preview.w===0&&preview.h===0,frameConnected:document.getElementById('frame').isConnected,retry:visible('retry'),answer:visible('answer'),stackShrank:snap('stack').h<window.active.stackH-20}};const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{active:window.active,done:window.done}});document.body.appendChild(out)}},1300);
+setTimeout(()=>{{const shell=snap('shell'),row=snap('row'),preview=snap('preview');window.done={{stopGone:!document.querySelector('button[aria-label="Stop answering" i]'),shellZero:shell.classes.includes('csg-tool-ui')&&shell.position==='absolute'&&shell.opacity==='0'&&shell.w===0&&shell.h===0,rowHistorical:row.classes.includes('csg-tool-summary')&&!row.classes.includes('csg-tool-summary-live')&&row.opacity==='0',controlsZero:snap('list').w===0&&snap('list').h===0,previewZero:preview.classes.includes('csg-hidden-preview')&&!preview.classes.includes('csg-preview-live-layout')&&preview.position==='absolute'&&preview.opacity==='0'&&preview.w===0&&preview.h===0,frameConnected:document.getElementById('frame').isConnected,retry:visible('retry'),answer:visible('answer')}};const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{active:window.active,done:window.done}});document.body.appendChild(out)}},1300);
 </script></body></html>'''
 
 def main():
@@ -47,8 +47,8 @@ def main():
         raise AssertionError(f'no result\n{proc.stderr[-1500:]}')
     payload = json.loads(html.unescape(match.group(1)))
     required = {
-        'active': {'stop', 'shellLive', 'rowLive', 'previewLive', 'retry'},
-        'done': {'stopGone', 'shellZero', 'rowHistorical', 'controlsZero', 'previewZero', 'frameConnected', 'retry', 'answer', 'stackShrank'},
+        'active': {'stop', 'shellZeroLive', 'rowLive', 'previewLive', 'retry'},
+        'done': {'stopGone', 'shellZero', 'rowHistorical', 'controlsZero', 'previewZero', 'frameConnected', 'retry', 'answer'},
     }
     failures = {
         phase: {key: checks.get(key) for key in required[phase] if checks.get(key) is not True}
@@ -60,7 +60,7 @@ def main():
     failures = {k:v for k,v in failures.items() if v}
     if failures:
         raise AssertionError(f'generation completion failures: {failures}\npayload={json.dumps(payload, indent=2)}')
-    print('PASS generation-completion: live Tool/App preview keeps a measurable off-flow box only while generating')
+    print('PASS generation-completion: live summary shell is 0x0 while App preview keeps its measurable off-flow box')
     print('PASS generation-completion: completed Tool shell and preview become 0x0; Retry remains actionable')
 
 if __name__ == '__main__':

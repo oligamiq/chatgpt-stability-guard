@@ -24,17 +24,19 @@ PAGE = f'''<!doctype html><html><head><meta charset="utf-8"><style>
 body{{font:16px sans-serif}} {CONTENT_CSS}
 </style></head><body>
 <div id="composer-host"><form><div id="prompt-textarea" contenteditable="true"></div><button id="stop" aria-label="Stop answering">Stop</button></form></div>
-<section data-testid="conversation-turn-20" data-turn="assistant"><div class="agent-turn">
-<span id="shell" class="group/tool-message"><span id="row" class="block my-1.5"><div role="button"><button id="list" aria-label="Open tool call list"><svg width="18" height="18"></svg></button><span>Called tool</span><svg width="16" height="16"></svg></div></span></span>
-<div id="answer">answer</div></div></section>
+<section data-testid="conversation-turn-20" data-turn="assistant"><div id="agent" class="agent-turn" style="display:flex;flex-direction:column;gap:16px;width:768px"><div id="answer">answer</div></div></section>
 <script>
 const SETTINGS={json.dumps(SETTINGS)};
 globalThis.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:{{remove(){{}},get(def,cb){{if(Object.prototype.hasOwnProperty.call(def,'uiLanguage'))cb({{uiLanguage:'en'}});else cb({{settings:SETTINGS}});}}}}}}}};
 {CONTENT_JS}
 function snap(id){{const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);return{{w:r.width,h:r.height,pos:s.position,op:s.opacity,cls:[...e.classList]}}}}
-setTimeout(()=>{{const sh=snap('shell'),row=snap('row');window.active={{shell:!sh.cls.includes('csg-tool-ui')&&sh.pos!=='absolute'&&sh.w>0&&sh.h>0,row:row.cls.includes('csg-tool-summary-live')&&row.op==='0'}}}},500);
-setTimeout(()=>document.getElementById('stop').setAttribute('aria-label','Send message'),650);
-setTimeout(()=>{{const sh=snap('shell'),row=snap('row'),li=snap('list');window.done={{stop:!document.querySelector('button[aria-label="Stop answering" i]'),shell:sh.cls.includes('csg-tool-ui')&&sh.pos==='absolute'&&sh.w===0&&sh.h===0,row:row.cls.includes('csg-tool-summary')&&!row.cls.includes('csg-tool-summary-live'),control:li.w===0&&li.h===0}};const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{active:window.active,done:window.done}});document.body.appendChild(out)}},1250);
+function zeroShell(id){{const s=snap(id);return s.cls.includes('csg-tool-ui')&&s.pos==='absolute'&&s.w===0&&s.h===0}}
+setTimeout(()=>{{const agent=document.getElementById('agent'),answer=document.getElementById('answer');for(let i=0;i<16;i++){{const sh=document.createElement('span');sh.id=`shell-${{i}}`;sh.className='group/tool-message';const row=document.createElement('span');row.id=`row-${{i}}`;row.className='block my-1.5';row.innerHTML=`<div role="button"><button id="list-${{i}}" aria-label="Open tool call list"><svg width="18" height="18"></svg></button><span>Called tool</span><svg width="16" height="16"></svg></div>`;sh.appendChild(row);agent.insertBefore(sh,answer)}}}},100);
+setTimeout(()=>{{const rows=[...Array(16)].map((_,i)=>snap(`row-${{i}}`));window.active={{allShellsOffFlow:[...Array(16)].every((_,i)=>zeroShell(`shell-${{i}}`)),allRowsLive:rows.every(r=>r.cls.includes('csg-tool-summary-live')&&r.op==='0'),compact:document.getElementById('agent').getBoundingClientRect().height<100}}}},1000);
+setTimeout(()=>{{const loader=document.createElement('div');loader.id='loader';loader.className='no-scrollbar';loader.setAttribute('role','progressbar');loader.style.cssText='width:320px;height:80px';loader.textContent='Loading app template';document.getElementById('shell-0').appendChild(loader)}},1150);
+setTimeout(()=>{{const sh=snap('shell-0'),loader=snap('loader');window.appGrow={{shellFailsOpen:!sh.cls.includes('csg-tool-ui')&&sh.pos!=='absolute'&&sh.w>0&&sh.h>0,loaderVisible:loader.w===320&&loader.h===80&&loader.op==='1',othersStayOffFlow:[...Array(15)].every((_,i)=>zeroShell(`shell-${{i+1}}`))}};document.getElementById('loader').remove()}},1200);
+setTimeout(()=>document.getElementById('stop').setAttribute('aria-label','Send message'),1450);
+setTimeout(()=>{{const rows=[...Array(16)].map((_,i)=>snap(`row-${{i}}`));window.done={{stop:!document.querySelector('button[aria-label="Stop answering" i]'),allShellsOffFlow:[...Array(16)].every((_,i)=>zeroShell(`shell-${{i}}`)),allRowsHistorical:rows.every(r=>r.cls.includes('csg-tool-summary')&&!r.cls.includes('csg-tool-summary-live'))}};const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{active:window.active,appGrow:window.appGrow,done:window.done}});document.body.appendChild(out)}},2300);
 </script></body></html>'''
 def main():
     with tempfile.TemporaryDirectory(prefix='csg-summary-generation-') as tmp:
@@ -42,7 +44,7 @@ def main():
         target.write_text(PAGE, encoding='utf-8')
         proc = subprocess.run([
             CHROME, '--headless=new', '--no-sandbox', '--disable-gpu',
-            '--virtual-time-budget=1700', '--dump-dom', target.as_uri(),
+            '--virtual-time-budget=2600', '--dump-dom', target.as_uri(),
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20)
     match = re.search(r'<pre id="result"[^>]*>(.*?)</pre>', proc.stdout, re.S)
     if not match:

@@ -27,8 +27,9 @@ html.csg-hide-tools .csg-tool > .csg-trace-body {
   margin-block-end: calc(-1 * var(--csg-collapse-block, 0px)) !important;
 }
 
-/* Live/protected summary chrome is pixel-invisible but retains its exact layout
-   box. This preserves any App visibility/size bootstrap contract. */
+/* Live/protected summary rows stay mounted and pixel-invisible. Their row box is
+   preserved for App bootstrap measurement, while a structurally summary-only
+   group/tool-message shell may be taken out of outer flex flow by csg-tool-ui. */
 html.csg-hide-tool-summary .csg-tool-summary-live {
   opacity: 0 !important;
   color: transparent !important;

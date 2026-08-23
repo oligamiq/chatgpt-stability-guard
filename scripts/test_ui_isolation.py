@@ -169,6 +169,13 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
     <div id="embed-passive" class="no-scrollbar">passive tool output</div><div class="h-px"></div>
     <div id="embed-app-header"><div role="button"><img alt="App"><button>Menu</button>App</div></div>
     <div id="embed-app" class="no-scrollbar"><iframe id="embed-app-frame" src="about:blank" width="320" height="120"></iframe></div><div class="h-px"></div>
+    <div id="config-card-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Configurator">Configurator</span></div>
+    <div id="config-card" class="no-scrollbar"><div style="height:240px"><iframe id="config-card-frame" title="ui://other-tool/config-editor?mode=test" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
+    <div id="config-card-divider" class="bg-token-border-default my-3 h-px w-full"></div>
+    <div id="message-timeout-preview-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
+    <div id="message-timeout-preview" class="no-scrollbar"><div style="height:240px"><iframe id="message-timeout-preview-frame" title="ui://other-tool/file-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
+    <div id="message-timeout-preview-divider" class="bg-token-border-default my-3 h-px w-full"></div>
+    <div id="message-delivery-error" class="text-token-text-error">Message delivery timed out. Please try again. <button id="message-delivery-retry">Retry</button></div>
     <div id="preview-broken-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
     <div id="preview-broken" class="no-scrollbar"><div id="preview-broken-wrap" style="height:37px"><iframe id="preview-broken-frame" title="ui://other-tool/file-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
     <div id="preview-broken-divider" class="bg-token-border-default my-3 h-px w-full"></div>
@@ -185,6 +192,9 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
     <div id="preview-iframe-replace-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
     <div id="preview-iframe-replace" class="no-scrollbar"><div id="preview-iframe-replace-wrap" style="height:37px"><iframe id="preview-iframe-replace-old" title="ui://other-tool/file-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
     <div id="preview-iframe-replace-divider" class="bg-token-border-default my-3 h-px w-full"></div>
+    <div id="preview-full-replace-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
+    <div id="preview-full-replace" class="no-scrollbar"><div style="height:37px"><iframe id="preview-full-replace-old" title="ui://other-tool/file-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
+    <div id="preview-full-replace-divider" class="bg-token-border-default my-3 h-px w-full"></div>
     <div id="preview-success-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
     <div id="preview-success" class="no-scrollbar"><div id="preview-success-wrap" style="height:37px"><iframe id="preview-success-frame" title="ui://other-tool/result-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
     <div id="preview-success-divider" class="bg-token-border-default my-3 h-px w-full"></div>
@@ -386,7 +396,7 @@ window.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:{{ge
 <script>
 window.__clicks={{}};
 const ACTION_IDS=['connector','library','inner-connect','auth-link','aria-switch','thinking-connect','shell-connect','summary-retry','details-connect','embed-connect',
-  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect','heavy-connect','live-shell-connect','live-collapsed-connect','live-classless-retry','real-called-tool-connect','real-called-tool-play','real-role-link','real-role-button','real-tabindex-control','unrelated-stateful-menu','preview-unrelated-connect','preview-retry'];
+  'placeholder-connect','header-connect','dynamic-tool-connect','dynamic-details-connect','embed-dynamic-connect','dynamic-placeholder-connect','dynamic-header-connect','heavy-connect','live-shell-connect','live-collapsed-connect','live-classless-retry','real-called-tool-connect','real-called-tool-play','real-role-link','real-role-button','real-tabindex-control','unrelated-stateful-menu','preview-unrelated-connect','message-delivery-retry','preview-retry'];
 function registerAction(id) {{
   const el=document.getElementById(id);
   if (!el || el.dataset.csgTestBound==='1') return;
@@ -423,8 +433,13 @@ function summaryGone(id) {{
   const state=snapshot(id);
   if (state.classes.includes('csg-tool-summary-live') ||
       state.classes.includes('csg-prehide-tool-summary-row-live')) {{
-    // Live/App-capable rows must retain their natural geometry while exposing no
-    // pixels. Geometry collapse here can deadlock ChatGPT App bootstrap.
+    // Live rows remain mounted. A summary-only structural shell may itself be
+    // removed from flex flow; App/action-capable shells must retain geometry.
+    const shell=el.closest('[class~="group/tool-message"]');
+    if (shell?.classList.contains('csg-tool-ui')) {{
+      const ss=getComputedStyle(shell), sr=shell.getBoundingClientRect();
+      return state.display!=='none' && state.opacity==='0' && ss.position==='absolute' && sr.width===0 && sr.height===0;
+    }}
     return state.display!=='none' && state.opacity==='0' && state.width>0 && state.height>0;
   }}
   if (state.classes.includes('csg-tool-summary')) {{
@@ -569,16 +584,13 @@ setTimeout(() => {{
     }})(),
     authorizeSummaryRemainsActionable:!document.getElementById('authorize-details').classList.contains('csg-tool-ui') && physicallyRendered('authorize-summary'),
     realCalledToolPreContentAppGeometryPreserved:window.__preContentAppGeometryPreserved===true,
-    realCalledToolLiveLayoutPreserved:document.getElementById('real-called-tool-row').classList.contains('csg-tool-summary-live') &&
-      snapshot('real-called-tool-shell').position!=='absolute' && snapshot('real-called-tool-shell').opacity==='1' && summaryGone('real-called-tool-row'),
-    realCalledToolLiveChildrenSized:snapshot('real-tool-list-button').width>0 && snapshot('real-tool-list-button').height>0 &&
-      snapshot('real-tool-list-icon').width>0 && snapshot('real-tool-list-icon').height>0 &&
-      snapshot('real-called-tool-label').width>0 && snapshot('real-called-tool-label').height>0 &&
-      snapshot('real-called-tool-chevron').width>0 && snapshot('real-called-tool-chevron').height>0,
+    realCalledToolLiveSummaryOnlyOffFlow:document.getElementById('real-called-tool-row').classList.contains('csg-tool-summary-live') &&
+      snapshot('real-called-tool-shell').classes.includes('csg-tool-ui') && snapshot('real-called-tool-shell').position==='absolute' &&
+      zeroRect('real-called-tool-shell') && summaryGone('real-called-tool-row'),
     realCalledToolTextPreserved:document.getElementById('real-called-tool-shell').textContent.includes('Called tool'),
     realCalledToolJaMarked:document.getElementById('real-called-tool-ja-row').classList.contains('csg-tool-summary-live'),
-    realCalledToolJaLiveLayoutPreserved:snapshot('real-called-tool-ja-shell').position!=='absolute' &&
-      snapshot('real-called-tool-ja-shell').opacity==='1' && summaryGone('real-called-tool-ja-row'),
+    realCalledToolJaLiveSummaryOnlyOffFlow:snapshot('real-called-tool-ja-shell').classes.includes('csg-tool-ui') &&
+      snapshot('real-called-tool-ja-shell').position==='absolute' && zeroRect('real-called-tool-ja-shell') && summaryGone('real-called-tool-ja-row'),
     realCalledToolAppShellVisible:!snapshot('real-called-tool-app-shell').classes.includes('csg-tool-ui') && snapshot('real-called-tool-app-shell').position!=='absolute' && physicallyRendered('real-called-tool-app-shell'),
     realCalledToolAppRowInvisibleAndSized:summaryGone('real-called-tool-app-row'),
     realCalledToolAppLoaderVisible:physicallyRendered('real-called-tool-app-loader'),
@@ -779,6 +791,29 @@ setTimeout(() => {{
   }}
 }}, 2650);
 setTimeout(() => {{
+  // Replace iframe + mount + header in one React-like commit while reusing the
+  // existing divider. Cleanup of the detached old entry must not clear divider
+  // state already adopted by the new entry.
+  const oldHeader=document.getElementById('preview-full-replace-header');
+  const oldMount=document.getElementById('preview-full-replace');
+  const divider=document.getElementById('preview-full-replace-divider');
+  if (oldHeader && oldMount && divider) {{
+    const header=document.createElement('div');
+    header.id='preview-full-replace-header-new';
+    header.className='mt-2 sm:mt-4';
+    header.textContent='Previewer replacement';
+    const mount=document.createElement('div');
+    mount.id='preview-full-replace-new';
+    mount.className='no-scrollbar';
+    const wrap=document.createElement('div'); wrap.style.height='180px';
+    const frame=document.createElement('iframe');
+    frame.id='preview-full-replace-new-frame'; frame.title='ui://other-tool/file-preview';
+    frame.src='about:blank'; frame.style.cssText='width:100%;height:100%';
+    wrap.appendChild(frame); mount.appendChild(wrap);
+    oldHeader.replaceWith(header); oldMount.replaceWith(mount);
+  }}
+}}, 2675);
+setTimeout(() => {{
   const mount=snapshot('preview-iframe-replace');
   window.__sameMountReplacementProtected =
     mount.previewState==='hidden' && mount.opacity==='0' && mount.position==='absolute' &&
@@ -808,7 +843,7 @@ setTimeout(() => {{
   const states={{}};
   for (const id of ['connector','library','outside-pre','old-classless-summary','old-classless-body','old-fragmented-en-summary','old-fragmented-en-body','long-old-summary','long-old-body','passive-tool','interactive-tool','tool-with-markdown-controls','tool-with-auth-link',
     'tool-with-aria-action','dynamic-input-tool','fragmented-bootstrap-tool','passive-thinking','interactive-thinking','dynamic-tool','tool-with-iframe-surface','tool-with-markdown-iframe','tool-with-image-surface','tool-with-svg-surface','tool-bootstrap-text-false-positive','markdown-loading-pre','interactive-heavy-pre','passive-shell','aria-only-shell','aria-only-summary','retry-summary-shell','summary-retry','partial-summary-shell','partial-summary-button','interactive-shell','passive-details',
-    'interactive-details','dynamic-details','recover-details','surface-error-placeholder','root-surface-error-placeholder','embed-passive','embed-app','preview-broken-header','preview-broken','preview-broken-frame','preview-broken-divider','preview-percent-header','preview-percent','preview-percent-frame','preview-percent-divider','preview-sibling-guard-header','preview-sibling-guard','preview-sibling-guard-frame','preview-sibling-guard-divider','preview-unrelated-tool','preview-unrelated-connect','preview-replace-header','preview-replace-new','preview-replace-frame','preview-replace-divider','preview-iframe-replace-header','preview-iframe-replace','preview-iframe-replace-new','preview-iframe-replace-divider','preview-success-header','preview-success','preview-success-frame','preview-success-divider','preview-late-grow-header','preview-late-grow','preview-late-grow-frame','preview-late-grow-divider','preview-shrink-header','preview-shrink','preview-shrink-frame','preview-shrink-divider','preview-error-header','preview-error','preview-error-frame','preview-error-surface','embed-action','embed-trigger-action','embed-trigger-action-control','embed-dynamic','embed-text-dynamic','placeholder-passive',
+    'interactive-details','dynamic-details','recover-details','surface-error-placeholder','root-surface-error-placeholder','embed-passive','embed-app','config-card-header','config-card','config-card-frame','config-card-divider','message-timeout-preview-header','message-timeout-preview','message-timeout-preview-frame','message-timeout-preview-divider','message-delivery-error','message-delivery-retry','preview-broken-header','preview-broken','preview-broken-frame','preview-broken-divider','preview-percent-header','preview-percent','preview-percent-frame','preview-percent-divider','preview-sibling-guard-header','preview-sibling-guard','preview-sibling-guard-frame','preview-sibling-guard-divider','preview-unrelated-tool','preview-unrelated-connect','preview-replace-header','preview-replace-new','preview-replace-frame','preview-replace-divider','preview-iframe-replace-header','preview-iframe-replace','preview-iframe-replace-new','preview-iframe-replace-divider','preview-full-replace-header-new','preview-full-replace-new','preview-full-replace-new-frame','preview-full-replace-divider','preview-success-header','preview-success','preview-success-frame','preview-success-divider','preview-late-grow-header','preview-late-grow','preview-late-grow-frame','preview-late-grow-divider','preview-shrink-header','preview-shrink','preview-shrink-frame','preview-shrink-divider','preview-error-header','preview-error','preview-error-frame','preview-error-surface','embed-action','embed-trigger-action','embed-trigger-action-control','embed-dynamic','embed-text-dynamic','placeholder-passive',
     'placeholder-action','placeholder-header-action','placeholder-header-body','dynamic-placeholder','dynamic-header-placeholder-header',
     'dynamic-header-placeholder-body','reuse-passive-tool','live-tool','live-pre','live-shell','live-tool-summary','live-shell-body','live-interactive-shell',
     'live-interactive-summary','live-shell-connect','live-interactive-body','live-embed','live-placeholder','live-app-error','live-app-motion','real-called-tool-play-shell','real-called-tool-play','classless-label-app-media','classless-label-app-svg',
@@ -859,6 +894,21 @@ setTimeout(() => {{
     rootSurfaceErrorPlaceholderVisible: !states['root-surface-error-placeholder'].classes.includes('csg-prehide-tool-block') && physicallyRendered('root-surface-error-placeholder'),
     passiveLegacyEmbedPreserved: !states['embed-passive'].classes.includes('csg-tool-embed') && states['embed-passive'].display!=='none',
     appIframeEmbedVisible: !states['embed-app'].classes.includes('csg-tool-embed') && states['embed-app'].display!=='none' && physicallyRendered('embed-app-frame'),
+    uiRouteConfigCardSuppressed: states['config-card'].previewState==='hidden' &&
+      states['config-card-header'].previewState==='hidden' &&
+      states['config-card'].position==='absolute' && states['config-card'].opacity==='0' &&
+      states['config-card'].width===0 && states['config-card'].height===0 &&
+      states['config-card-header'].width===0 && states['config-card-header'].height===0 &&
+      states['config-card-divider'].previewDivider==='hidden' && states['config-card-divider'].display==='none' &&
+      document.getElementById('config-card-frame').isConnected,
+    messageDeliveryRetryDoesNotFailOpenPreview: states['message-timeout-preview'].previewState==='hidden' &&
+      states['message-timeout-preview-header'].previewState==='hidden' &&
+      states['message-timeout-preview'].position==='absolute' && states['message-timeout-preview'].opacity==='0' &&
+      states['message-timeout-preview'].width===0 && states['message-timeout-preview'].height===0 &&
+      states['message-timeout-preview-header'].width===0 && states['message-timeout-preview-header'].height===0 &&
+      states['message-timeout-preview-divider'].previewDivider==='hidden' && states['message-timeout-preview-divider'].display==='none' &&
+      document.getElementById('message-timeout-preview-frame').isConnected && physicallyRendered('message-delivery-error') &&
+      physicallyRendered('message-delivery-retry') && hit['message-delivery-retry'],
     passivePreviewSuppressedWithoutDetach: states['preview-broken'].previewState==='hidden' &&
       states['preview-broken-header'].previewState==='hidden' &&
       states['preview-broken'].display!=='none' && states['preview-broken'].position==='absolute' && states['preview-broken'].opacity==='0' &&
@@ -896,6 +946,12 @@ setTimeout(() => {{
       states['preview-iframe-replace'].width===0 && states['preview-iframe-replace'].height===0 && states['preview-iframe-replace-new'].height>=170 &&
       states['preview-iframe-replace-divider'].previewDivider==='hidden' && states['preview-iframe-replace-divider'].display==='none' &&
       document.getElementById('preview-iframe-replace-new').isConnected,
+    fullMountReplacementPreservesSharedDivider: states['preview-full-replace-new'].previewState==='hidden' &&
+      states['preview-full-replace-new'].classes.includes('csg-hidden-preview') && states['preview-full-replace-new'].position==='absolute' &&
+      states['preview-full-replace-new'].opacity==='0' && states['preview-full-replace-new'].width===0 && states['preview-full-replace-new'].height===0 &&
+      states['preview-full-replace-header-new'].previewState==='hidden' && states['preview-full-replace-header-new'].width===0 &&
+      states['preview-full-replace-header-new'].height===0 && states['preview-full-replace-divider'].previewDivider==='hidden' &&
+      states['preview-full-replace-divider'].display==='none' && document.getElementById('preview-full-replace-new-frame').isConnected,
     grownPreviewStaysHidden: states['preview-success'].previewState==='hidden' && states['preview-success'].classes.includes('csg-hidden-preview') &&
       states['preview-success-header'].classes.includes('csg-hidden-preview-header') &&
       states['preview-success'].display!=='none' && states['preview-success'].position==='absolute' && states['preview-success'].opacity==='0' &&

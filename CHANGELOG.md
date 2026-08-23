@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.20 — 2026-08-24
+
+- Removed the last large blank area during active generation: summary-only live `group/tool-message` shells now leave the outer flex flow instead of reserving one invisible `Called tool` row plus gap per tool call, while the React-owned summary row stays mounted.
+- Added synchronous fail-open when a hidden live summary shell grows App/bootstrap/action UI, so loaders, Connect/Auth/Retry controls, and rich App surfaces return to normal layout immediately; regression coverage streams 16 consecutive Tool summaries and verifies App growth within 50 ms.
+- Fixed the remaining blank embedded-tool area by covering every structured `ui://<tool>/<route>` rich UI route under `hideToolEmbeds`, instead of matching only route names containing `preview`; this includes `config-editor` and future config-card style routes.
+- Kept ordinary non-`ui://` iframes untouched and retained the existing Retry/Auth/Connect fail-open behavior.
+- Stopped generic conversation delivery failures such as `Message delivery timed out` + `Retry` from being mistaken for App-preview errors; true App `surface-error` and `Failed to fetch template` error UI still fails open.
+- Reproduced the reported authenticated conversation where `ui://desktop-commander/config-editor` reserved a 768×573px box, and a later `file-preview` was incorrectly reopened as a 768×310px box because a message-delivery Retry followed it. With the fixes, no `ui://` iframe, `desktop-commander-home` header, Tool shell, or empty ≥120px block remained effectively visible after generation stopped.
+- Added regression coverage for a query-bearing `ui://other-tool/config-editor?mode=test` route and for a hidden preview immediately followed by a generic message-delivery Retry, alongside the existing ordinary-iframe and App-error safety fixtures.
+
 ## 1.0.19 — 2026-08-24
 
 - Fixed `hideToolEmbeds` so passive `ui://.../file-preview` Tool/App previews are removed from conversation layout even when the iframe is healthy or large; this eliminates visible `desktop-commander-home` preview contents and the large blank/black space they could reserve.
