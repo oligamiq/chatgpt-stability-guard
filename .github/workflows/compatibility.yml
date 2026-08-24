@@ -43,9 +43,14 @@ jobs:
           node --version
           google-chrome --version
 
+      - name: Install Python test dependencies
+        id: python_deps
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.setup_node.outcome == 'success' }}
+        run: python3 -m pip install --disable-pip-version-check Pillow
+
       - name: Run extension regression suite
         id: regression
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.setup_node.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.setup_node.outcome == 'success' && steps.python_deps.outcome == 'success' }}
         continue-on-error: true
         shell: bash
         run: |
