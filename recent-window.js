@@ -19,6 +19,7 @@
     roleValidation: new Map(),
     roleLocks: new Map(),
     numeric: new Map(),
+    ambiguousLateNumeric: new Set(),
     messageIds: new Map(),
     identityEvidence: new Map(),
     keyTops: new Map(),
@@ -31,6 +32,7 @@
     pendingBoundaryKey: '',
     hiddenExchangeCount: 0,
     hiddenTurnCount: 0,
+    historyAvailable: false,
     scrollHost: null,
     recentContentHeight: 0,
     minScrollTop: 0,
@@ -49,6 +51,10 @@
     scrollbar: null,
     thumb: null,
     drag: null,
+    accordion: null,
+    accordionLabel: null,
+    expanded: false,
+    accordionTransitioning: false,
     lastMergeScrollTop: null,
     lastWindowKeys: [],
     bottomTailEvidence: null,
@@ -80,9 +86,13 @@
     return location.pathname.startsWith('/c/') || isShareRoute();
   }
 
-  function loadingCopy(stage, confirmed, total) {
+  function isJapaneseUi() {
     const preference = String(state.uiLanguage || 'auto').toLowerCase();
-    const japanese = preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
+    return preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
+  }
+
+  function loadingCopy(stage, confirmed, total) {
+    const japanese = isJapaneseUi();
     const count = japanese
       ? `${Math.min(confirmed, total)} / ${total} 対話を確認済み`
       : `${Math.min(confirmed, total)} / ${total} exchanges confirmed`;
@@ -326,6 +336,7 @@
       state.roleValidation.delete(key);
       state.roleLocks.delete(key);
       state.numeric.delete(key);
+      state.ambiguousLateNumeric.delete(key);
       state.messageIds.delete(key);
       state.identityEvidence.delete(key);
       state.keyTops.delete(key);
@@ -336,6 +347,7 @@
       state.boundaryKey = '';
       state.boundaryProvisional = false;
       state.pendingBoundaryKey = '';
+      delete ROOT.dataset.csgRecentMode;
       ROOT.classList.remove('csg-show-recent-only');
       if (state.scrollbar) state.scrollbar.hidden = true;
       publishState('waiting');
@@ -435,7 +447,13 @@
 
   function mergeWindow(items) {
     if (!items.length) return;
+    const knownBeforeMerge = new Set(state.sequence);
+    const boundaryNumericBeforeMerge = state.numeric.get(state.boundaryKey);
     for (const item of items) {
+      if (state.ready && !knownBeforeMerge.has(item.key) && Number.isInteger(item.index) &&
+          !Number.isInteger(boundaryNumericBeforeMerge)) {
+        state.ambiguousLateNumeric.add(item.key);
+      }
       if (item.role) observeRole(item.key, item.role);
       refreshAssistantContentEvidence(item);
       if (Number.isInteger(item.index)) state.numeric.set(item.key, item.index);
@@ -727,8 +745,10 @@
     // Semantic ordering is authoritative. An unknown mounted/reused turn is
     // not proven old, so keep it visible until refreshStructure() classifies it.
     let old = false;
-    if (semanticKnown) old = position < boundaryPosition;
-    else if (numericKnown) old = numeric < boundaryNumeric;
+    if (!state.expanded && !state.ambiguousLateNumeric.has(key)) {
+      if (semanticKnown) old = position < boundaryPosition;
+      else if (numericKnown) old = numeric < boundaryNumeric;
+    }
     turn.classList.toggle('csg-hidden-old-turn', old);
     return old;
   }
@@ -739,7 +759,141 @@
       if (markTurnElement(item.turn)) hidden += 1;
     }
     state.hiddenTurnCount = hidden;
+    if (hidden > 0 || state.hiddenExchangeCount > 0 || keyPosition(state.boundaryKey) > 0) {
+      state.historyAvailable = true;
+    }
     publishCounts();
+    updateAccordion();
+  }
+
+  function hasAccordionHistory() {
+    if (!state.boundaryKey) return false;
+    const boundaryPosition = keyPosition(state.boundaryKey);
+    return state.historyAvailable || state.hiddenExchangeCount > 0 || boundaryPosition > 0 || state.hiddenTurnCount > 0;
+  }
+
+  function accordionCopy() {
+    const count = Math.max(0, state.hiddenExchangeCount);
+    if (isJapaneseUi()) {
+      if (state.expanded) return `過去の対話を閉じる · 直近${state.n}件に戻る`;
+      return count > 0 ? `過去の対話 ${count}件を表示` : '過去の対話を表示';
+    }
+    if (state.expanded) return `Collapse earlier exchanges · Return to latest ${state.n}`;
+    return count > 0 ? `Show ${count} earlier exchange${count === 1 ? '' : 's'}` : 'Show earlier exchanges';
+  }
+
+  function ensureAccordion() {
+    if (state.accordion?.isConnected) return state.accordion;
+    const button = document.createElement('button');
+    button.id = 'csg-recent-accordion';
+    button.type = 'button';
+    const chevron = document.createElement('span');
+    chevron.className = 'csg-recent-accordion-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '⌄';
+    const label = document.createElement('span');
+    label.className = 'csg-recent-accordion-label';
+    button.append(chevron, label);
+    button.addEventListener('click', () => {
+      if (!state.ready || state.accordionTransitioning) return;
+      setAccordionExpanded(!state.expanded);
+    });
+    (document.body || ROOT).appendChild(button);
+    state.accordion = button;
+    state.accordionLabel = label;
+    return button;
+  }
+
+  function layoutAccordion() {
+    const button = state.accordion;
+    if (!button?.isConnected || !state.ready || !hasAccordionHistory() || !state.scrollHost) {
+      if (button) button.hidden = true;
+      return;
+    }
+    const viewport = visualViewportRect();
+    const host = state.scrollHost;
+    const rect = host === document.scrollingElement
+      ? { left: 0, right: viewport.right, top: viewport.top, height: viewport.height }
+      : host.getBoundingClientRect();
+    const left = Math.max(8, Math.max(0, rect.left));
+    const right = Math.min(viewport.right - 8, rect.right || viewport.right);
+    const center = right > left ? left + (right - left) / 2 : viewport.right / 2;
+    button.hidden = false;
+    button.style.left = `${Math.max(8, Math.min(viewport.right - 8, center))}px`;
+    button.style.top = `${Math.max(viewport.top + 10, rect.top + 10)}px`;
+  }
+
+  function syncAccordionModeClasses() {
+    if (!state.active || !state.ready || state.suspended) return;
+    ROOT.dataset.csgRecentMode = state.expanded ? 'expanded' : 'collapsed';
+    // Keep legacy classes as best-effort markers, but CSS relies on the data
+    // attribute because ChatGPT can rewrite the root class list at any time.
+    ROOT.classList.toggle('csg-show-recent-only', !state.expanded);
+    ROOT.classList.toggle('csg-recent-accordion-expanded', state.expanded);
+  }
+
+  function updateAccordion() {
+    if (!state.active) return;
+    syncAccordionModeClasses();
+    const button = ensureAccordion();
+    const history = hasAccordionHistory();
+    const visible = state.ready && history && !state.suspended;
+    button.hidden = !visible;
+    button.dataset.expanded = String(state.expanded);
+    button.setAttribute('aria-expanded', String(state.expanded));
+    if (state.accordionLabel) state.accordionLabel.textContent = accordionCopy();
+    if (visible) layoutAccordion();
+  }
+
+  async function setAccordionExpanded(expanded) {
+    const next = Boolean(expanded);
+    if (!state.ready || state.suspended || next === state.expanded || state.accordionTransitioning) return;
+    state.accordionTransitioning = true;
+    try {
+      if (next) {
+        state.expanded = true;
+        ROOT.classList.remove('csg-show-recent-only');
+        ROOT.classList.add('csg-recent-accordion-expanded');
+        markMountedTurns();
+        if (state.scrollbar) state.scrollbar.hidden = true;
+        updateAccordion();
+        return;
+      }
+
+      // Expanded history can move the virtualizer far enough that the recent-N
+      // boundary no longer exists in the mounted DOM and its cached coordinate is
+      // stale. Recover from the semantic tail instead of trusting that coordinate:
+      // the boundary is only N exchanges from the bottom, so this stays bounded.
+      let boundaryTurn = findMountedByKey(state.boundaryKey);
+      if (!boundaryTurn) {
+        const epoch = state.epoch;
+        if (!(await settleAtBottom(epoch))) return;
+        boundaryTurn = findMountedByKey(state.boundaryKey);
+        for (let attempt = 0; attempt < 48 && !boundaryTurn; attempt += 1) {
+          const before = scrollTop();
+          const nextTop = Math.max(0, before - Math.max(260, viewportHeight() * 0.68));
+          setScrollTop(nextTop);
+          await wait(70);
+          if (!(await mergeStableWindow(epoch, 45))) return;
+          boundaryTurn = findMountedByKey(state.boundaryKey);
+          if (nextTop <= 1 || Math.abs(scrollTop() - before) < 1) break;
+        }
+      }
+      if (!boundaryTurn) {
+        failOpenRecent();
+        return;
+      }
+      syncBoundaryCoordinate();
+      state.expanded = false;
+      ROOT.classList.remove('csg-recent-accordion-expanded');
+      ROOT.classList.add('csg-show-recent-only');
+      markMountedTurns();
+      updateMinimum();
+      scheduleCoordinateStabilization();
+      updateAccordion();
+    } finally {
+      state.accordionTransitioning = false;
+    }
   }
 
   function scrollTop() {
@@ -777,13 +931,29 @@
     return Math.max(0, scrollHeight() - viewportHeight());
   }
 
+  function effectiveMinScrollTop() {
+    return Math.min(state.minScrollTop, maxScrollTop());
+  }
+
+  function recentTailFitsViewport() {
+    return state.minScrollTop > maxScrollTop() + 2;
+  }
+
   function boundaryCoordinateInvalid() {
-    if (!state.ready || state.minScrollTop <= maxScrollTop() + 2) {
+    if (!state.ready) {
+      state.resizeScrollHeightGuard = null;
+      return false;
+    }
+    const currentHeight = scrollHeight();
+    // A semantic boundary can legitimately sit below maxScrollTop when the
+    // kept recent tail is shorter than the viewport. In that case native
+    // scrolling simply clamps to the bottom; the coordinate is still valid as
+    // long as it remains inside the scrollable content itself.
+    if (state.minScrollTop <= currentHeight + 2) {
       state.resizeScrollHeightGuard = null;
       return false;
     }
     if (Number.isFinite(state.resizeScrollHeightGuard)) {
-      const currentHeight = scrollHeight();
       if (Math.abs(currentHeight - state.resizeScrollHeightGuard) <= 2) return false;
       state.resizeScrollHeightGuard = null;
     }
@@ -804,25 +974,35 @@
     if (!(turn instanceof Element)) return document.scrollingElement;
     const candidates = [];
     for (let node = turn.parentElement; node && node !== document.body; node = node.parentElement) {
-      if (node.clientHeight <= 200 || node.scrollHeight <= node.clientHeight + 2) continue;
+      if (node.clientHeight <= 200) continue;
       const style = getComputedStyle(node);
       const className = String(node.className || '');
       const ratio = node.scrollHeight / Math.max(1, node.clientHeight);
+      const knownRoot = className.includes('csg-recent-scrollhost') || className.includes('group/scroll-root');
+      const nativeScrollable = /(auto|scroll|overlay)/.test(style.overflowY);
+      const programmaticHidden = style.overflowY === 'hidden';
+      const trusted = knownRoot || node.scrollTop > 0 || nativeScrollable || programmaticHidden;
+      // ChatGPT can expose the real scroll root before its virtualizer has
+      // populated enough height to make it physically scrollable. Keep trusted
+      // overflow/known-root candidates even while scrollHeight ~= clientHeight.
+      if (node.scrollHeight <= node.clientHeight + 2 && !trusted) continue;
       let score = 0;
       if (className.includes('csg-recent-scrollhost')) score += 200;
       if (className.includes('group/scroll-root')) score += 120;
       if (node.scrollTop > 0) score += 45;
-      if (/(auto|scroll|overlay)/.test(style.overflowY)) score += 30;
+      if (nativeScrollable) score += 30;
       // ChatGPT can keep the real programmatic scroll root at overflow:hidden.
-      if (style.overflowY === 'hidden') score += 12;
+      if (programmaticHidden) score += 12;
       if (ratio > 1.25) score += 25;
       else if (ratio < 1.08) score -= 20;
       if (node.clientHeight >= window.innerHeight * 0.55) score += 15;
       if (node.tagName === 'MAIN' && style.overflowY === 'visible') score -= 20;
-      candidates.push({ node, score, ratio });
+      candidates.push({ node, score, ratio, trusted });
     }
     candidates.sort((a, b) => b.score - a.score || b.ratio - a.ratio);
-    return candidates[0]?.node || document.scrollingElement;
+    const best = candidates.find((candidate) => candidate.trusted) || null;
+    const host = best?.node || document.scrollingElement;
+    return host;
   }
 
   function topInScrollContent(element) {
@@ -862,7 +1042,7 @@
   }
 
   function scheduleBoundaryGrace() {
-    if (state.boundaryGraceTimer || !state.ready || !state.boundaryProvisional) return;
+    if (state.boundaryGraceTimer || !state.ready || !state.boundaryProvisional || recentTailFitsViewport()) return;
     const epoch = state.epoch;
     state.boundaryGraceTimer = setTimeout(() => {
       state.boundaryGraceTimer = 0;
@@ -873,7 +1053,7 @@
         updateMinimum();
         return;
       }
-      if (scrollTop() <= state.minScrollTop + 2) failOpenRecent();
+      if (scrollTop() <= effectiveMinScrollTop() + 2) failOpenRecent();
     }, 160);
   }
 
@@ -895,28 +1075,40 @@
 
   function updateMinimum() {
     if (!state.ready) return;
+    // Keep recent-N's UI/state invariant alive even if ChatGPT rewrites root
+    // attributes or removes extension-owned top-level DOM between virtualizer
+    // passes. This maintenance path already runs every 750 ms while ready.
+    syncAccordionModeClasses();
+    updateAccordion();
     // ChatGPT's virtualizer can revise its total-height estimate without changing
     // the mounted turn structure. If the semantic boundary is currently mounted,
     // always refresh its physical coordinate before clamping or laying out the bar.
     syncBoundaryCoordinate();
+    if (state.expanded) {
+      state.recentContentHeight = Math.max(viewportHeight(), scrollHeight());
+      if (state.scrollbar) state.scrollbar.hidden = true;
+      layoutAccordion();
+      return;
+    }
     if (boundaryCoordinateInvalid()) {
       failOpenRecent();
       return;
     }
     state.recentContentHeight = Math.max(viewportHeight(), scrollHeight() - state.minScrollTop);
     const current = scrollTop();
+    const effectiveMin = effectiveMinScrollTop();
     if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (current < state.minScrollTop - 2) {
+      if (current < effectiveMin - 2) {
         failOpenRecent();
         return;
       }
-      if (current <= state.minScrollTop + 2) {
+      if (current <= effectiveMin + 2) {
         scheduleBoundaryGrace();
         layoutScrollbar();
         return;
       }
     }
-    if (current < state.minScrollTop - 1) setScrollTop(state.minScrollTop);
+    if (current < effectiveMin - 1) setScrollTop(effectiveMin);
     layoutScrollbar();
   }
 
@@ -1010,9 +1202,13 @@
     state.recovering = false;
     state.suspended = true;
     state.boundaryProvisional = false;
+    state.expanded = false;
+    state.accordionTransitioning = false;
     clearMountedMarks();
-    ROOT.classList.remove('csg-show-recent-only');
+    delete ROOT.dataset.csgRecentMode;
+    ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
     if (state.scrollbar) state.scrollbar.hidden = true;
+    if (state.accordion) state.accordion.hidden = true;
     detachScrollHost();
     publishState('degraded');
   }
@@ -1160,13 +1356,21 @@
       state.boundaryProvisional = false;
       state.keyTops.set(state.boundaryKey, state.minScrollTop);
       state.ready = true;
+      state.expanded = false;
+      state.accordionTransitioning = false;
       state.recentContentHeight = Math.max(viewportHeight(), scrollHeight() - state.minScrollTop);
+      ROOT.classList.remove('csg-recent-accordion-expanded');
       ROOT.classList.add('csg-show-recent-only');
       state.scrollHost?.classList?.add('csg-recent-scrollhost');
       markMountedTurns();
+      updateAccordion();
       await restoreInitialPosition(initialTop, initialWasBottom, initialAnchor, epoch);
       if (!isCurrentEpoch(epoch)) return;
       updateMinimum();
+      // updateMinimum() may fail open if ChatGPT revised the virtualized
+      // boundary while finalization was in progress. Never overwrite that
+      // degraded state with a stale ready publication.
+      if (!isCurrentEpoch(epoch) || !state.ready || state.suspended) return;
       scheduleCoordinateStabilization();
       publishState('ready');
     } catch (_error) {
@@ -1438,26 +1642,34 @@
     if (!state.ready) return;
     state.resizeScrollHeightGuard = scrollHeight();
     syncBoundaryCoordinate();
+    layoutAccordion();
     layoutScrollbar();
   }
 
   function onVisualViewportChange() {
     if (!state.ready) return;
+    layoutAccordion();
     layoutScrollbar();
   }
 
   function onScroll() {
     if (!state.ready) return;
+    if (state.expanded) {
+      syncBoundaryCoordinate();
+      layoutAccordion();
+      return;
+    }
     // Virtualizer height corrections can move the mounted semantic boundary while
     // simultaneously adjusting scrollTop. Re-anchor before enforcing the range.
     syncBoundaryCoordinate();
     if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
       const current = scrollTop();
-      if (current < state.minScrollTop - 2) {
+      const effectiveMin = effectiveMinScrollTop();
+      if (current < effectiveMin - 2) {
         failOpenRecent();
         return;
       }
-      if (current <= state.minScrollTop + 2) {
+      if (current <= effectiveMin + 2) {
         scheduleBoundaryGrace();
         layoutScrollbar();
         return;
@@ -1467,8 +1679,9 @@
       failOpenRecent();
       return;
     }
-    if (scrollTop() < state.minScrollTop - 1) {
-      setScrollTop(state.minScrollTop);
+    const effectiveMin = effectiveMinScrollTop();
+    if (scrollTop() < effectiveMin - 1) {
+      setScrollTop(effectiveMin);
       return;
     }
     layoutScrollbar();
@@ -1492,7 +1705,7 @@
   }
 
   function onWheel(event) {
-    if (!state.ready || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+    if (!state.ready || state.expanded || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
     syncBoundaryCoordinate();
     if (boundaryCoordinateInvalid()) {
       event.preventDefault();
@@ -1503,13 +1716,15 @@
     const delta = wheelDeltaPixels(event);
     if (nestedScrollableFor(event.target, delta)) return;
     const before = scrollTop();
+    const effectiveMin = effectiveMinScrollTop();
     if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (before < state.minScrollTop - 2) {
+      if (before < effectiveMin - 2) {
         failOpenRecent();
         return;
       }
-      if (before <= state.minScrollTop + 2 && delta < 0) {
+      if (before <= effectiveMin + 2 && delta < 0) {
         event.preventDefault();
+        setScrollTop(effectiveMin);
         scheduleBoundaryGrace();
         return;
       }
@@ -1517,9 +1732,9 @@
     const target = clampRecentTop(before + delta);
     // Only block a gesture that would cross the semantic recent-N boundary.
     // Otherwise let the browser/ChatGPT keep native trackpad momentum and smoothness.
-    if (delta < 0 && before <= state.minScrollTop + 1) {
+    if (delta < 0 && before <= effectiveMin + 1) {
       event.preventDefault();
-      setScrollTop(state.minScrollTop);
+      setScrollTop(effectiveMin);
       layoutScrollbar();
       return;
     }
@@ -1530,7 +1745,7 @@
       // If native/default handling did nothing, fall back once without replacing
       // a functioning native scroll path.
       if (Math.abs(after - before) < 0.5 && Math.abs(target - before) > 0.5) setScrollTop(target);
-      else if (after < state.minScrollTop - 1) setScrollTop(state.minScrollTop);
+      else if (after < effectiveMin - 1) setScrollTop(effectiveMin);
       layoutScrollbar();
     });
   }
@@ -1548,10 +1763,12 @@
   }
 
   function onKeyDown(event) {
-    if (!state.ready || isInteractiveKeyTarget(event.target) || isInteractiveKeyTarget(document.activeElement)) return;
+    if (!state.ready || state.expanded || isInteractiveKeyTarget(event.target) || isInteractiveKeyTarget(document.activeElement)) return;
+    syncBoundaryCoordinate();
     const current = scrollTop();
+    const effectiveMin = effectiveMinScrollTop();
     let target = null;
-    if (event.key === 'Home' && !event.ctrlKey && !event.metaKey) target = state.minScrollTop;
+    if (event.key === 'Home' && !event.ctrlKey && !event.metaKey) target = effectiveMin;
     else if (event.key === 'End' && !event.ctrlKey && !event.metaKey) target = maxScrollTop();
     else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) target = current - viewportHeight() * 0.9;
     else if (event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey)) target = current + viewportHeight() * 0.9;
@@ -1565,15 +1782,14 @@
       : document.activeElement;
     if (direction && nestedScrollableFor(keyTarget, direction)) return;
 
-    syncBoundaryCoordinate();
     if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (current < state.minScrollTop - 2) {
+      if (current < effectiveMin - 2) {
         failOpenRecent();
         return;
       }
-      if (target <= state.minScrollTop + 2) {
+      if (target <= effectiveMin + 2) {
         event.preventDefault();
-        setScrollTop(state.minScrollTop);
+        setScrollTop(effectiveMin);
         scheduleBoundaryGrace();
         return;
       }
@@ -1633,7 +1849,7 @@
   }
 
   function layoutScrollbar() {
-    if (!state.scrollbar || !state.thumb || !state.scrollHost || !state.ready) {
+    if (!state.scrollbar || !state.thumb || !state.scrollHost || !state.ready || state.expanded) {
       if (state.scrollbar) state.scrollbar.hidden = true;
       return;
     }
@@ -1719,6 +1935,8 @@
     state.recoveryEpoch = -1;
     state.suspended = false;
     state.boundaryProvisional = false;
+    state.expanded = false;
+    state.accordionTransitioning = false;
     state.resizeScrollHeightGuard = null;
     clearMountedMarks();
     detachScrollHost();
@@ -1732,6 +1950,7 @@
     state.roleValidation.clear();
     state.roleLocks.clear();
     state.numeric.clear();
+    state.ambiguousLateNumeric.clear();
     state.messageIds.clear();
     state.identityEvidence.clear();
     state.keyTops.clear();
@@ -1740,13 +1959,16 @@
     state.pendingBoundaryKey = '';
     state.hiddenExchangeCount = 0;
     state.hiddenTurnCount = 0;
+    state.historyAvailable = false;
     state.recentContentHeight = 0;
     state.minScrollTop = 0;
     state.lastMergeScrollTop = null;
     state.lastWindowKeys = [];
     state.bottomTailEvidence = null;
-    ROOT.classList.remove('csg-show-recent-only');
+    delete ROOT.dataset.csgRecentMode;
+    ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
     if (state.scrollbar) state.scrollbar.hidden = true;
+    if (state.accordion) state.accordion.hidden = true;
     publishState('preparing');
     armLoadingWatchdog();
   }

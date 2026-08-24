@@ -16,7 +16,7 @@ Stability Guard for ChatGPT
 - 最新turn以外の `Failed to fetch template` 読込エラーの非表示
 - traceの低コントラスト化・高さ制限
 - code / log の画面外遅延描画
-- 直近N回の対話だけ表示（任意・既定OFF、N=3）
+- 直近N回を常時表示し、それ以前の対話をアコーディオンに折りたたむ（任意・既定OFF、N=3）
 - 古い会話ターンの遅延描画（任意・既定OFF）
 - 現在の非表示・遅延描画件数の表示
 - 各最適化を個別にON/OFF

@@ -1,7 +1,7 @@
-# Microsoft Edge Add-ons submission — 1.0.20
+# Microsoft Edge Add-ons submission — 1.0.22
 
 ## Package
-- ZIP: `dist/stability-guard-for-chatgpt-1.0.20.zip`
+- ZIP: `dist/stability-guard-for-chatgpt-1.0.22.zip`
 - Manifest: MV3
 - Runtime permission: `storage` only
 - Content-script scope: `https://chatgpt.com/*`

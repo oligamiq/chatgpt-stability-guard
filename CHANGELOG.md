@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.22 — 2026-08-25
+
+- Removed the residual blank gap between a completed thinking header and assistant response when many historical MCP `Called tool` rows were already prehidden to 0px but their outer `group/tool-message` flex items still consumed one parent `gap-4` slot each.
+- Added a bounded idle bootstrap sweep that classifies only the passive structural Tool shells; historical MCP rows remain CSS-only, so long-thread marker counts stay bounded while the redundant shell leaves flex flow.
+- Preserved App/Auth/bootstrap fail-open behavior by reusing the existing structural safety checks instead of collapsing Tool shells with a broad CSS selector.
+- Reproduced the linked authenticated conversation directly: 16 passive historical Tool shells changed from 16 zero-height flex items producing a 272px gap to 16 absolute 0×0 shells with the intended 16px content gap; the assistant body remained visible and historical row JS markers stayed at 0.
+- Added a 700-row stress assertion for CSS-only historical rows plus collapsed passive shells, and re-ran UI isolation, generation completion, virtual-spacer compaction, package validation, and the complete regression suite.
+- Reworked recent-N into an accordion: the latest N exchanges remain visible while earlier history can be expanded temporarily and collapsed back to the semantic recent boundary without deleting or moving ChatGPT-owned conversation DOM.
+- Added bounded boundary reacquisition when collapsing after deep history scrolling, including recovery when the recent boundary has been fully virtualized out; ambiguous branch/edit states still fail open.
+- Made collapsed/expanded styling rely on a dedicated `data-csg-recent-mode` state instead of ChatGPT's mutable root class list, and retained a persistent history-available signal so assistant-only virtualized history still exposes the accordion control.
+- Added regression coverage for expand/collapse, fully virtualized boundary recovery, root-class clobbering, assistant-only older history, touch/reduced-motion UI behavior, and the existing share/private recent-N cases.
+
+## 1.0.21 — 2026-08-24
+
+- Removed ChatGPT virtualizer blank gaps without destroying the placeholder element's own measurement geometry: nearby empty `--last-known-height` / `--estimated-turn-height` placeholders keep their real box height while an equal negative flow margin removes the visible gap.
+- Added anchor-based scroll compensation when a virtual placeholder is compacted, restored, resized, or replaced by the real turn. Middle placeholders keep the following mounted turn at the same screen coordinate; leading-boundary placeholders prioritize zero visible gap and compensate `scrollTop` when the missing turn materializes.
+- Fixed the residual live `Called tool` gap at its source: unrelated `clear` classifications no longer release a `group/tool-message` shell while another valid summary marker still owns that shell.
+- Retained synchronous fail-open for App/bootstrap/action growth, including loaders or Retry controls mounted inside the summary row, so real interactive UI is never trapped in a 0×0 Tool shell.
+- Added regression coverage for 16 streamed summary-only Tool shells, clear/marker ownership races, nested App/Retry and adjacent Connect/Auth fail-open, 74/132px virtualizer placeholders, consecutive 60/80px placeholders materializing in one commit, real turns that temporarily carry estimated-height classes, same-node React reuse, and a static far-offscreen placeholder that is discovered only after scrolling toward it.
+- Made virtualizer reconciliation resilient to throttled animation frames with an 80 ms bounded timer fallback; per-scroll-host listeners wake far-offscreen placeholders, while recent wheel/touch/scroll-key intent prevents automatic anchor compensation from fighting deliberate user scrolling.
+- Reproduced the linked authenticated conversation with the v1.0.21 candidate: visible mounted-turn gaps were reduced to 0 while ChatGPT could still materialize virtualized turns as they entered the viewport.
+
 ## 1.0.20 — 2026-08-24
 
 - Removed the last large blank area during active generation: summary-only live `group/tool-message` shells now leave the outer flex flow instead of reserving one invisible `Called tool` row plus gap per tool call, while the React-owned summary row stays mounted.

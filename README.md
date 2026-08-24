@@ -20,7 +20,7 @@ A local-only Manifest V3 extension for reducing lag and clutter in long ChatGPT 
 - traceの低コントラスト化・高さ制限
 - アニメーション/transition抑制
 - code / log (`pre`) の遅延描画
-- **直近N回の対話だけ表示**（既定OFF、Nの既定値は3。ChatGPTの仮想スクロールを壊さずsemantic boundaryを固定し、直近N範囲専用スクロールバーで操作。branch/editや大きな仮想化構造変更を検出した場合は安全のためrecent-Nだけfail-openし、ページ再読み込み後に再構築）
+- **直近N回 + 過去履歴アコーディオン**（既定OFF、Nの既定値は3。直近N件は常時表示し、それ以前は1つのアコーディオン操作から一時展開できる。展開中は通常スクロールへ戻り、折りたたむとsemantic boundaryへ安全に復帰。ChatGPTの会話DOMは削除・移動せず、branch/editや大きな仮想化構造変更ではrecent-Nだけfail-open）
 - 古い会話ターンの遅延描画（Aggressive・既定OFF）
 - 現在ページで何件非表示・遅延描画しているかの表示
 - 機能ごとのON/OFF（設定変更はページ再読み込み後に反映）

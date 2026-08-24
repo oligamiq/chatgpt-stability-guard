@@ -53,9 +53,9 @@
 
     <section class="danger">
       <h2>長大スレッド</h2>
-      <label class="setting"><span><b>直近N回の対話だけ表示</b><small>古い対話を非表示・既定OFF</small></span><input id="showRecentOnly" type="checkbox"></label>
-      <label class="row">表示する対話数 N <input id="recentExchanges" type="number" min="1" max="100" step="1"></label>
-      <p class="hint">1対話 = ユーザー発言から次のユーザー発言直前まで。DOM自体は削除せず、直近N範囲専用のスクロールバーを使う。</p>
+      <label class="setting"><span><b>直近N回 + 過去を折りたたむ</b><small>古い対話をアコーディオン化・既定OFF</small></span><input id="showRecentOnly" type="checkbox"></label>
+      <label class="row">常時表示する対話数 N <input id="recentExchanges" type="number" min="1" max="100" step="1"></label>
+      <p class="hint">1対話 = ユーザー発言から次のユーザー発言直前まで。直近N件を常時表示し、それ以前はアコーディオンから一時展開できる。会話DOMは削除しない。</p>
       <label class="setting"><span><b>未完成なら自動Continue</b><small>指定パターンに一致した最新返答へ Continue を自動送信・既定OFF</small></span><input id="autoContinueIncomplete" type="checkbox"></label>
       <div class="pattern-config" id="autoContinuePatternConfig">
         <label class="pattern-row"><span id="autoContinuePatternModeLabel">判定方式</span><select id="autoContinuePatternMode"><option value="glob">Glob</option><option value="regex">Regex</option></select></label>

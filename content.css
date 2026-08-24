@@ -39,6 +39,15 @@ html.csg-hide-tool-summary .csg-tool-summary-live {
    into these nodes later, including when an old turn is revisited. A completed
    passive group/tool-message is summary chrome only, though, so take that shell
    out of flex flow at 0x0 instead of leaving one gap-4 slot per tool call. */
+/* ChatGPT virtualizes off-screen turns with an empty height placeholder. Keep
+   that placeholder's own measurable box for its virtualizer, but cancel the
+   same amount from normal flow so users never see the placeholder as blank
+   space. JS compensates scrollTop before/after applying or removing this class. */
+.csg-virtual-spacer-overlap {
+  margin-block-end: calc(-1 * var(--csg-virtual-spacer-block, 0px)) !important;
+  pointer-events: none !important;
+}
+
 html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
   position: absolute !important;
   inline-size: 0 !important;
@@ -212,23 +221,77 @@ html.csg-hide-tool-summary summary.csg-tool-summary-stealth::-webkit-details-mar
   display: none !important;
 }
 
-html.csg-show-recent-only .csg-hidden-old-turn {
+html[data-csg-recent-mode="collapsed"] .csg-hidden-old-turn {
   visibility: hidden !important;
   pointer-events: none !important;
   user-select: none !important;
 }
 
-html.csg-show-recent-only,
-html.csg-show-recent-only body,
-html.csg-show-recent-only .csg-recent-scrollhost {
+html[data-csg-recent-mode="collapsed"],
+html[data-csg-recent-mode="collapsed"] body,
+html[data-csg-recent-mode="collapsed"] .csg-recent-scrollhost {
   scrollbar-width: none !important;
 }
 
-html.csg-show-recent-only::-webkit-scrollbar,
-html.csg-show-recent-only body::-webkit-scrollbar,
-html.csg-show-recent-only .csg-recent-scrollhost::-webkit-scrollbar {
+html[data-csg-recent-mode="collapsed"]::-webkit-scrollbar,
+html[data-csg-recent-mode="collapsed"] body::-webkit-scrollbar,
+html[data-csg-recent-mode="collapsed"] .csg-recent-scrollhost::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
+}
+
+#csg-recent-accordion {
+  position: fixed;
+  z-index: 2147483647;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(82vw, 560px);
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, Canvas 94%, transparent);
+  color: CanvasText;
+  box-shadow: 0 3px 16px color-mix(in srgb, CanvasText 12%, transparent);
+  backdrop-filter: blur(12px);
+  font: 600 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+#csg-recent-accordion[hidden] { display: none !important; }
+
+#csg-recent-accordion:hover {
+  background: color-mix(in srgb, CanvasText 7%, Canvas);
+}
+
+#csg-recent-accordion:focus-visible {
+  outline: 2px solid color-mix(in srgb, CanvasText 62%, transparent);
+  outline-offset: 2px;
+}
+
+.csg-recent-accordion-chevron {
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+#csg-recent-accordion[data-expanded="true"] .csg-recent-accordion-chevron {
+  transform: rotate(180deg);
+}
+
+html.csg-reduce-motion .csg-recent-accordion-chevron {
+  transition-duration: 0.001ms !important;
+}
+
+.csg-recent-accordion-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #csg-recent-scrollbar {
@@ -304,6 +367,13 @@ html.csg-compact-traces .csg-trace-body {
 }
 
 @media (pointer: coarse) {
+  #csg-recent-accordion {
+    min-height: 44px;
+    max-width: min(88vw, 560px);
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+
   #csg-recent-scrollbar {
     width: 16px;
     background: transparent;

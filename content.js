@@ -52,6 +52,8 @@
       toolSummaryInitialSweepQueued: new WeakSet(),
       toolSummaryFallbackSweepPending: new WeakSet(),
       toolSummaryFallbackSweepCursor: new WeakMap(),
+      toolSummaryShellSweepRoots: new Set(),
+      toolSummaryShellSweepScheduled: false,
       toolSummaryPendingRoots: new Set(),
       summaryMutationRoots: new Set(),
       summaryMutationScheduled: false,
@@ -80,6 +82,13 @@
       freezeTimer: 0,
       toolCleanupTimer: 0,
       detachedCleanupTimer: 0,
+      virtualSpacers: new Map(),
+      virtualSpacerObserver: null,
+      virtualSpacerScheduled: false,
+      virtualSpacerFallbackTimer: 0,
+      virtualSpacerScrollBound: false,
+      virtualSpacerScrollHosts: new WeakSet(),
+      virtualSpacerUserIntentAt: new WeakMap(),
       autoContinueTimer: 0,
       autoContinueSending: false,
       autoContinueHandledKeys: new Set(),
@@ -161,6 +170,341 @@
 
     function isConversationTurnScoped(el) {
       return el instanceof Element && Boolean(el.closest(TURN_SELECTOR));
+    }
+
+    const VIRTUAL_SPACER_SELECTOR = '[class*="--last-known-height"][class*="--estimated-turn-height"]';
+    const VIRTUAL_SPACER_CLASS = 'csg-virtual-spacer-overlap';
+
+    function isVirtualTurnSpacer(element) {
+      if (!(element instanceof Element) || !element.matches(VIRTUAL_SPACER_SELECTOR)) return false;
+      // Never compact an actual turn (or a node React is recycling inside one),
+      // even if it temporarily carries the same estimated-height utility class.
+      if (element.closest(TURN_SELECTOR)) return false;
+      if (element.childElementCount || String(element.textContent || '').trim()) return false;
+      const className = String(element.className || '');
+      return className.includes('min-h-14');
+    }
+
+    function siblingMountedTurn(element, direction) {
+      if (!(element instanceof Element)) return null;
+      let sibling = direction < 0 ? element.previousElementSibling : element.nextElementSibling;
+      for (let hops = 0; sibling instanceof Element && hops < 16; hops += 1) {
+        if (sibling.matches(TURN_SELECTOR)) return sibling;
+        const nested = sibling.querySelector(TURN_SELECTOR);
+        if (nested instanceof Element) return nested;
+        // Consecutive virtual placeholders represent one continuous missing
+        // window. Walk across them so every spacer can share the nearest real
+        // turn as an anchor instead of leaving all but the last gap untouched.
+        if (!isVirtualTurnSpacer(sibling)) return null;
+        sibling = direction < 0 ? sibling.previousElementSibling : sibling.nextElementSibling;
+      }
+      return null;
+    }
+
+    function findScrollHostFor(element) {
+      if (!(element instanceof Element)) return document.scrollingElement;
+      const candidates = [];
+      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+        if (node.clientHeight <= 200 || node.scrollHeight <= node.clientHeight + 2) continue;
+        const style = getComputedStyle(node);
+        const className = String(node.className || '');
+        const ratio = node.scrollHeight / Math.max(1, node.clientHeight);
+        let score = 0;
+        if (className.includes('group/scroll-root')) score += 120;
+        if (node.scrollTop > 0) score += 45;
+        if (/(auto|scroll|overlay)/.test(style.overflowY)) score += 30;
+        if (style.overflowY === 'hidden') score += 12;
+        if (ratio > 1.25) score += 25;
+        else if (ratio < 1.08) score -= 20;
+        if (node.clientHeight >= window.innerHeight * 0.55) score += 15;
+        if (node.tagName === 'MAIN' && style.overflowY === 'visible') score -= 20;
+        candidates.push({ node, score, ratio });
+      }
+      candidates.sort((a, b) => b.score - a.score || b.ratio - a.ratio);
+      return candidates[0]?.node || document.scrollingElement;
+    }
+
+    function noteVirtualSpacerUserIntent(host) {
+      if (host instanceof Element) state.virtualSpacerUserIntentAt.set(host, performance.now());
+    }
+
+    function bindVirtualSpacerScrollHost(host) {
+      if (!(host instanceof Element) || host === document.scrollingElement ||
+          state.virtualSpacerScrollHosts.has(host)) return;
+      state.virtualSpacerScrollHosts.add(host);
+      host.addEventListener('wheel', () => noteVirtualSpacerUserIntent(host), { capture: true, passive: true });
+      host.addEventListener('touchmove', () => noteVirtualSpacerUserIntent(host), { capture: true, passive: true });
+      host.addEventListener('scroll', () => {
+        if (state.settings.enabled) scheduleVirtualSpacerReconcile();
+      }, { passive: true });
+    }
+
+    function virtualScrollTop(host) {
+      if (!host) return 0;
+      return host === document.scrollingElement ? (window.scrollY || host.scrollTop || 0) : host.scrollTop;
+    }
+
+    function setVirtualScrollTop(host, value) {
+      if (!host) return;
+      const top = Math.max(0, Number(value) || 0);
+      if (host === document.scrollingElement) window.scrollTo(0, top);
+      else host.scrollTop = top;
+    }
+
+    function virtualViewportRect(host) {
+      if (host === document.scrollingElement) {
+        const viewport = window.visualViewport;
+        const top = Math.max(0, viewport?.offsetTop || 0);
+        const height = Math.max(1, viewport?.height || window.innerHeight || 1);
+        return { top, bottom: top + height, height };
+      }
+      const rect = host?.getBoundingClientRect?.();
+      return rect ? { top: rect.top, bottom: rect.bottom, height: Math.max(1, rect.height) } :
+        { top: 0, bottom: window.innerHeight, height: Math.max(1, window.innerHeight) };
+    }
+
+    function virtualSpacerNearViewport(spacer, host) {
+      const rect = spacer.getBoundingClientRect();
+      const viewport = virtualViewportRect(host);
+      const margin = viewport.height * 1.5;
+      return rect.bottom >= viewport.top - margin && rect.top <= viewport.bottom + margin;
+    }
+
+    function updateVirtualSpacerBaselines(host = null) {
+      for (const record of state.virtualSpacers.values()) {
+        if (host && record.host !== host) continue;
+        if (!(record.anchor instanceof Element) || !record.anchor.isConnected) continue;
+        record.anchorTop = record.anchor.getBoundingClientRect().top;
+        record.scrollTop = virtualScrollTop(record.host);
+      }
+    }
+
+    function compensateVirtualAnchor(host, anchor, beforeTop) {
+      if (!host || !(anchor instanceof Element) || !anchor.isConnected || !Number.isFinite(beforeTop)) return;
+      const afterTop = anchor.getBoundingClientRect().top;
+      const delta = afterTop - beforeTop;
+      if (Math.abs(delta) > 0.5) setVirtualScrollTop(host, virtualScrollTop(host) + delta);
+      updateVirtualSpacerBaselines(host);
+    }
+
+    function releaseVirtualSpacer(spacer, record = state.virtualSpacers.get(spacer), compensate = true) {
+      if (!(spacer instanceof Element)) return;
+      const anchor = record?.anchor;
+      const host = record?.host;
+      const beforeTop = compensate && anchor instanceof Element && anchor.isConnected
+        ? anchor.getBoundingClientRect().top : NaN;
+      record?.observer?.disconnect();
+      spacer.classList.remove(VIRTUAL_SPACER_CLASS);
+      spacer.style.removeProperty('--csg-virtual-spacer-block');
+      state.virtualSpacers.delete(spacer);
+      if (compensate) compensateVirtualAnchor(host, anchor, beforeTop);
+    }
+
+    function compactVirtualSpacer(spacer) {
+      if (!isVirtualTurnSpacer(spacer) || state.virtualSpacers.has(spacer)) return false;
+      // The leading virtualizer boundary can have no mounted predecessor. A
+      // mounted successor is enough: negative flow cancellation removes the
+      // blank, while scroll compensation keeps that successor stationary when
+      // the scroll root has room to compensate.
+      const anchor = siblingMountedTurn(spacer, 1);
+      if (!(anchor instanceof Element)) return false;
+      const height = spacer.getBoundingClientRect().height;
+      if (!Number.isFinite(height) || height < 8) return false;
+      const host = findScrollHostFor(anchor);
+      bindVirtualSpacerScrollHost(host);
+      if (!virtualSpacerNearViewport(spacer, host)) return false;
+      const beforeTop = anchor.getBoundingClientRect().top;
+      spacer.style.setProperty('--csg-virtual-spacer-block', `${height}px`);
+      spacer.classList.add(VIRTUAL_SPACER_CLASS);
+      compensateVirtualAnchor(host, anchor, beforeTop);
+      const record = {
+        anchor,
+        host,
+        height,
+        anchorTop: anchor.getBoundingClientRect().top,
+        scrollTop: virtualScrollTop(host),
+        observer: null
+      };
+      state.virtualSpacers.set(spacer, record);
+      // React may recycle the placeholder element itself into a real turn or
+      // insert content into it without replacing the node. Observe only this
+      // tracked spacer so attributes/content fail open immediately without a
+      // document-wide attribute observer.
+      record.observer = new MutationObserver(() => {
+        const current = state.virtualSpacers.get(spacer);
+        if (!current) return;
+        if (!isVirtualTurnSpacer(spacer)) {
+          // Same-node React reuse: fail open before the next paint rather than
+          // leaving the real turn under the negative spacer margin for a frame.
+          releaseVirtualSpacer(spacer, current, true);
+          return;
+        }
+        scheduleVirtualSpacerReconcile();
+      });
+      record.observer.observe(spacer, {
+        attributes: true,
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+      return true;
+    }
+
+        function reconcileRemovedVirtualSpacers() {
+      const byHost = new Map();
+      for (const [spacer, record] of [...state.virtualSpacers]) {
+        if (spacer.isConnected && isVirtualTurnSpacer(spacer)) continue;
+        state.virtualSpacers.delete(spacer);
+        record.observer?.disconnect();
+        const { anchor, host } = record;
+        if (!(anchor instanceof Element) || !anchor.isConnected || !host) {
+          if (spacer.isConnected) {
+            record.observer?.disconnect();
+            spacer.classList.remove(VIRTUAL_SPACER_CLASS);
+            spacer.style.removeProperty('--csg-virtual-spacer-block');
+          }
+          continue;
+        }
+        if (!byHost.has(host)) byHost.set(host, []);
+        byHost.get(host).push({ spacer, record });
+      }
+      for (const [host, items] of byHost) {
+        const currentScrollTop = virtualScrollTop(host);
+        const stable = items.filter(({ record }) =>
+          Math.abs(currentScrollTop - record.scrollTop) <= 6 &&
+          record.anchor instanceof Element && record.anchor.isConnected &&
+          Number.isFinite(record.anchorTop));
+        for (const { spacer } of items) {
+          if (spacer.isConnected) {
+            spacer.classList.remove(VIRTUAL_SPACER_CLASS);
+            spacer.style.removeProperty('--csg-virtual-spacer-block');
+          }
+        }
+        if (stable.length) {
+          const viewport = virtualViewportRect(host);
+          const center = (viewport.top + viewport.bottom) / 2;
+          stable.sort((a, b) =>
+            Math.abs(a.record.anchor.getBoundingClientRect().top - center) -
+            Math.abs(b.record.anchor.getBoundingClientRect().top - center));
+          const { record } = stable[0];
+          const delta = record.anchor.getBoundingClientRect().top - record.anchorTop;
+          if (Math.abs(delta) > 0.5) setVirtualScrollTop(host, currentScrollTop + delta);
+        }
+        for (const { spacer, record } of items) {
+          if (spacer.isConnected) record.observer?.disconnect();
+        }
+        updateVirtualSpacerBaselines(host);
+      }
+    }
+
+    function reconcileVirtualSpacers() {
+      state.virtualSpacerScheduled = false;
+      reconcileRemovedVirtualSpacers();
+      if (!state.settings.enabled) {
+        for (const [spacer, record] of [...state.virtualSpacers]) releaseVirtualSpacer(spacer, record, true);
+        return;
+      }
+      for (const [spacer, record] of [...state.virtualSpacers]) {
+        if (!spacer.isConnected) continue;
+        if (!virtualSpacerNearViewport(spacer, record.host)) {
+          releaseVirtualSpacer(spacer, record, true);
+          continue;
+        }
+        const height = spacer.getBoundingClientRect().height;
+        if (Math.abs(height - record.height) > 0.5) {
+          const beforeTop = record.anchor?.getBoundingClientRect?.().top;
+          record.height = height;
+          spacer.style.setProperty('--csg-virtual-spacer-block', `${height}px`);
+          compensateVirtualAnchor(record.host, record.anchor, beforeTop);
+        } else if (!spacer.classList.contains(VIRTUAL_SPACER_CLASS)) {
+          const beforeTop = record.anchor?.getBoundingClientRect?.().top;
+          spacer.classList.add(VIRTUAL_SPACER_CLASS);
+          compensateVirtualAnchor(record.host, record.anchor, beforeTop);
+        }
+      }
+      for (const spacer of document.querySelectorAll(VIRTUAL_SPACER_SELECTOR)) compactVirtualSpacer(spacer);
+      updateVirtualSpacerBaselines();
+    }
+
+    function runScheduledVirtualSpacerReconcile() {
+      if (!state.virtualSpacerScheduled) return;
+      if (state.virtualSpacerFallbackTimer) {
+        clearTimeout(state.virtualSpacerFallbackTimer);
+        state.virtualSpacerFallbackTimer = 0;
+      }
+      reconcileVirtualSpacers();
+    }
+
+    function scheduleVirtualSpacerReconcile() {
+      if (state.virtualSpacerScheduled) return;
+      state.virtualSpacerScheduled = true;
+      requestAnimationFrame(runScheduledVirtualSpacerReconcile);
+      state.virtualSpacerFallbackTimer = setTimeout(runScheduledVirtualSpacerReconcile, 80);
+    }
+
+    function bindVirtualSpacerObserver() {
+      if (!state.settings.enabled) {
+        state.virtualSpacerObserver?.disconnect();
+        for (const [spacer, record] of [...state.virtualSpacers]) releaseVirtualSpacer(spacer, record, true);
+        return;
+      }
+      if (!state.virtualSpacerObserver) {
+        state.virtualSpacerObserver = new MutationObserver((mutations) => {
+          let relevant = false;
+          let removedTracked = false;
+          for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+              if (!(node instanceof Element)) continue;
+              if (node.matches(VIRTUAL_SPACER_SELECTOR) || node.querySelector?.(VIRTUAL_SPACER_SELECTOR)) {
+                relevant = true;
+                break;
+              }
+            }
+            for (const node of mutation.removedNodes) {
+              if (!(node instanceof Element)) continue;
+              if (state.virtualSpacers.has(node) || node.matches(`.${VIRTUAL_SPACER_CLASS}`) ||
+                  node.querySelector?.(`.${VIRTUAL_SPACER_CLASS}`)) {
+                relevant = true;
+                removedTracked = true;
+                break;
+              }
+            }
+          }
+          // Removal changes flow immediately. Reconcile the whole removed batch
+          // inside this MutationObserver microtask so anchor compensation lands
+          // before the next paint; rAF remains for discovery/resizing work.
+          if (removedTracked) reconcileRemovedVirtualSpacers();
+          if (relevant) scheduleVirtualSpacerReconcile();
+        });
+      }
+      state.virtualSpacerObserver.disconnect();
+      state.virtualSpacerObserver.observe(document.documentElement, { childList: true, subtree: true });
+      if (!state.virtualSpacerScrollBound) {
+        state.virtualSpacerScrollBound = true;
+        document.addEventListener('wheel', () => noteVirtualSpacerUserIntent(document.scrollingElement), { capture: true, passive: true });
+        document.addEventListener('touchmove', () => noteVirtualSpacerUserIntent(document.scrollingElement), { capture: true, passive: true });
+        document.addEventListener('keydown', (event) => {
+          if (/^(?:ArrowUp|ArrowDown|PageUp|PageDown|Home|End| )$/.test(event.key)) {
+            noteVirtualSpacerUserIntent(document.scrollingElement);
+          }
+        }, { capture: true });
+        document.addEventListener('scroll', () => {
+          if (!state.settings.enabled) return;
+          // A spacer can have been far outside the initial scan window and thus
+          // not be tracked yet. Every scroll frame gets one rAF-coalesced probe
+          // so newly-near static placeholders are compacted as they approach.
+          // Do not update anchor baselines synchronously here: layout/materialize
+          // scroll events can fire before MutationObserver reconciliation and
+          // would overwrite the pre-change position we need for compensation.
+          // A genuine user scroll is instead detected by record.scrollTop drift;
+          // reconcile then skips compensation and refreshes baselines at the end.
+          scheduleVirtualSpacerReconcile();
+        }, { capture: true, passive: true });
+        window.addEventListener('resize', () => {
+          if (state.settings.enabled) scheduleVirtualSpacerReconcile();
+        }, { passive: true });
+      }
+      scheduleVirtualSpacerReconcile();
     }
 
     function boundedElementText(element, maxChars = 220, maxNodes = 24) {
@@ -691,25 +1035,33 @@
       if (!(el instanceof Element)) return null;
       const inTurn = isConversationTurnScoped(el);
       const testId = el.getAttribute('data-testid') || '';
-      const hasAppAction = inTurn && hasActionableUi(el, true);
-      const activeAppBootstrap = inTurn && hasActiveAppBootstrapUi(el);
-      const hasAppSurface = inTurn && hasAppSurfaceUi(el);
-      const liveToolProtected = inTurn && isProtectedLiveToolTurn(el, latestTurnIndex);
+      const thinkingCandidate = inTurn && hasKey(testId, THINK_KEYS);
+      const toolCandidate = inTurn && hasKey(testId, TOOL_KEYS);
+      const heavyCandidate = inTurn && state.settings.lazyHeavyBlocks &&
+        (el.matches('pre') || hasKey(testId, ['code']));
+      const optimizationCandidate = thinkingCandidate || toolCandidate || heavyCandidate;
+      // Deep actionable/App checks are the expensive part of classification.
+      // Do them only for nodes that could actually become an optimization
+      // target; generic turns/data-testid wrappers otherwise caused repeated
+      // nested subtree scans on long conversations.
+      const hasAppAction = optimizationCandidate && hasActionableUi(el, true);
+      const activeAppBootstrap = optimizationCandidate && hasActiveAppBootstrapUi(el);
+      const hasAppSurface = optimizationCandidate && hasAppSurfaceUi(el);
+      const liveToolProtected = optimizationCandidate && isProtectedLiveToolTurn(el, latestTurnIndex);
       // Interactive rich UI must fail open. Thinking/tool traces are optimization
       // targets; Connect/Add/auth controls are application UI and stay untouched.
       // Tool wrappers in the newest exchange are also kept live because ChatGPT
       // apps can defer template/bootstrap work until their DOM is visible/laid out.
-      const isThinking = inTurn && hasKey(testId, THINK_KEYS) && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected;
-      const isTool = inTurn && hasKey(testId, TOOL_KEYS) && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected;
+      const isThinking = thinkingCandidate && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected;
+      const isTool = toolCandidate && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected;
       const isTrace = isThinking || isTool;
-      const traceChildren = [...el.children].filter((child) => child.classList.contains('csg-trace-body'));
+      const traceChildren = isTrace ? [...el.children].filter((child) => child.classList.contains('csg-trace-body')) : [];
       let traceBody = null;
       if (isTrace && el.children.length > 1) {
         const body = el.lastElementChild;
         if (body && !hasActionableUi(body, true)) traceBody = body;
       }
-      const isHeavy = inTurn && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected && state.settings.lazyHeavyBlocks &&
-        (el.matches('pre') || hasKey(testId, ['code']));
+      const isHeavy = heavyCandidate && !hasAppAction && !activeAppBootstrap && !hasAppSurface && !liveToolProtected;
       return { el, isThinking, isTool, isHeavy, traceChildren, traceBody };
     }
 
@@ -729,11 +1081,20 @@
       }
     }
 
+    function isStrongToolSummaryMarker(marker) {
+      return marker instanceof Element && marker.matches(
+        '.csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live');
+    }
+
     function markToolChrome(shell, marker = shell) {
       if (!(shell instanceof Element) || !(marker instanceof Element)) return;
       shell.classList.add('csg-tool-ui');
       state.textToolShells.add(shell);
-      state.toolShellMarkers.set(shell, marker);
+      const existing = state.toolShellMarkers.get(shell);
+      const keepExisting = shell.matches('[class~="group/tool-message"]') &&
+        existing instanceof Element && existing.isConnected && shell.contains(existing) &&
+        isStrongToolSummaryMarker(existing) && !isStrongToolSummaryMarker(marker);
+      if (!keepExisting) state.toolShellMarkers.set(shell, marker);
       if (!shell.matches('[class~="group/tool-message"]')) observeToolMarker(marker);
     }
 
@@ -936,8 +1297,15 @@
         const retryCard = !isAppBoundary &&
           controls.some((control) => PREVIEW_RETRY_RE.test(boundedControlLabel(control, 181))) &&
           APP_ERROR_RETRY_RE.test(stableElementText(sibling));
-        if (explicitError || retryCard) local.push(sibling);
-        if (isAppBoundary || explicitError || retryCard || boundedElementText(sibling, 81, 12) || controls.length) break;
+        const actionCard = !isAppBoundary && controls.some((control) => {
+          const label = boundedControlLabel(control, 181);
+          // Retry is contextual: generic message-delivery Retry must not reopen
+          // an unrelated hidden App. Dedicated retryCard above requires an App
+          // error context; Connect/Auth/Add actions can fail open on label alone.
+          return ACTION_LINK_LABEL_RE.test(label) && !PREVIEW_RETRY_RE.test(label);
+        });
+        if (explicitError || retryCard || actionCard) local.push(sibling);
+        if (isAppBoundary || explicitError || retryCard || actionCard || boundedElementText(sibling, 81, 12) || controls.length) break;
       }
       for (const scope of local) {
         if (previewSiblingHasAppError(scope)) return true;
@@ -1252,6 +1620,19 @@
       return [...candidates];
     }
 
+    function historicalToolSummaryShellCandidatesFor(scanRoot) {
+      if (!(scanRoot instanceof Element)) return [];
+      const candidates = new Set();
+      const addKnownButton = (button) => {
+        if (button.closest('.markdown')) return;
+        const row = directToolSummaryRow(button);
+        if (row) candidates.add(row);
+      };
+      if (scanRoot.matches(TOOL_LIST_BUTTON_SELECTOR)) addKnownButton(scanRoot);
+      scanRoot.querySelectorAll?.(TOOL_LIST_BUTTON_SELECTOR).forEach(addKnownButton);
+      return [...candidates];
+    }
+
     function knownToolSummaryCandidatesFor(scanRoot) {
       if (!(scanRoot instanceof Element)) return [];
       const candidates = new Set(historicalToolSummaryCandidatesFor(scanRoot));
@@ -1262,6 +1643,35 @@
       if (scanRoot.matches(TOOL_LIST_BUTTON_SELECTOR)) addKnownButton(scanRoot);
       scanRoot.querySelectorAll?.(TOOL_LIST_BUTTON_SELECTOR).forEach(addKnownButton);
       return [...candidates];
+    }
+
+    function processHistoricalToolSummaryShellSweep() {
+      state.toolSummaryShellSweepScheduled = false;
+      if (!state.settings.enabled || !state.settings.hideToolSummary) {
+        state.toolSummaryShellSweepRoots.clear();
+        return;
+      }
+      const latestTurnIndex = mountedLatestTurnIndex();
+      const batch = [...state.toolSummaryShellSweepRoots].slice(0, 8);
+      for (const root of batch) {
+        state.toolSummaryShellSweepRoots.delete(root);
+        if (!(root instanceof Element) || !root.isConnected) continue;
+        for (const candidate of historicalToolSummaryShellCandidatesFor(root)) {
+          // The row pixels are already owned by prehide.css. Classify only the
+          // structural shell so historical zero-height flex items do not retain
+          // one parent gap each. App/Auth/bootstrap checks still fail open.
+          classifyToolChromeCandidate(candidate, latestTurnIndex, true);
+        }
+      }
+      scheduleToolChromeCleanup();
+      if (state.toolSummaryShellSweepRoots.size) scheduleHistoricalToolSummaryShellSweep();
+    }
+
+    function scheduleHistoricalToolSummaryShellSweep(root = null) {
+      if (root instanceof Element) state.toolSummaryShellSweepRoots.add(root);
+      if (state.toolSummaryShellSweepScheduled || !state.toolSummaryShellSweepRoots.size) return;
+      state.toolSummaryShellSweepScheduled = true;
+      idle(processHistoricalToolSummaryShellSweep);
     }
 
     function canGrowToolSummaryWrapper(parent, candidate) {
@@ -1462,7 +1872,13 @@
         unmarkToolSummary(target);
         unmarkToolSummaryStealth(target);
         unmarkToolSummaryLive(target);
-        if (structuralShell instanceof Element) unmarkToolChrome(structuralShell);
+        if (structuralShell instanceof Element &&
+            !structuralShell.querySelector('.csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live')) {
+          // A mutation classifier can clear a nested/non-summary candidate after
+          // the real summary row has already claimed the same shell. Do not let
+          // that unrelated clear race release the parent and recreate a flex gap.
+          unmarkToolChrome(structuralShell);
+        }
         return;
       }
       if (mode === 'live') {
@@ -1671,7 +2087,14 @@
     }
 
     function shellHasToolLabel(shell, latestTurnIndex) {
-      const marker = state.toolShellMarkers.get(shell);
+      let marker = state.toolShellMarkers.get(shell);
+      if (shell.matches('[class~="group/tool-message"]')) {
+        const strong = shell.querySelector('.csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live');
+        if (strong instanceof Element && strong.isConnected) {
+          marker = strong;
+          state.toolShellMarkers.set(shell, strong);
+        }
+      }
       if (!(marker instanceof Element) || !marker.isConnected || !shell.contains(marker)) return false;
       if (isProtectedLiveToolTurn(shell, latestTurnIndex)) return false;
       if (shell.matches('[class~="group/tool-message"]')) return isPassiveStructuralToolShell(shell, latestTurnIndex);
@@ -1767,7 +2190,13 @@
       // Mounted App/tool surfaces remain rendered to avoid lifecycle/template
       // failures. Only confirmed broken preview surfaces are visually suppressed.
       const toolCandidates = [];
+      const historicalShellCandidates = [];
       if (state.settings.enabled && state.settings.hideToolSummary && scanHasTurn) {
+        // The native MCP row can be prehidden to 0px before JS owns any marker.
+        // Always discover its structural shell, including conversation-level
+        // scans, so a parent flex gap cannot accumulate across many old calls.
+        historicalToolSummaryShellCandidatesFor(scanRoot)
+          .forEach((candidate) => historicalShellCandidates.push(candidate));
         const turnNotSwept = scanRoot.matches(TURN_SELECTOR) &&
           !state.toolSummaryInitialSweepQueued.has(scanRoot);
         if (turnNotSwept) state.toolSummaryFallbackSweepPending.add(scanRoot);
@@ -1783,7 +2212,9 @@
             .forEach((candidate) => toolCandidates.push(candidate));
         } else {
           // Routine historical rescans stay cheap: legacy disclosure controls plus
-          // markers CSG already owns. Real MCP rows remain CSS-only.
+          // markers CSG already owns. Current MCP rows remain CSS-only, but their
+          // summary-only outer shells still need to leave flex flow or each zero-
+          // height row consumes another parent gap-4 slot.
           historicalToolSummaryCandidatesFor(scanRoot).forEach((candidate) => toolCandidates.push(candidate));
         }
       }
@@ -1816,6 +2247,12 @@
         for (const candidate of uniqueToolCandidates) {
           classifyToolChromeCandidate(candidate, latestTurnIndex, true);
         }
+      }
+      // Do not promote these late historical rows into JS-owned summary markers:
+      // prehide.css already makes their pixels 0x0. We only classify the parent
+      // structural shell so zero-height flex items cannot accumulate row-gap.
+      for (const candidate of [...new Set(historicalShellCandidates)]) {
+        classifyToolChromeCandidate(candidate, latestTurnIndex, true);
       }
       scanOldAppErrors(oldAppErrorCandidates, turnStructureChanged);
     }
@@ -2096,20 +2533,22 @@
 
     async function submitAutoContinue(composer) {
       const initialButton = findSendButton(composer);
-      if (!(initialButton instanceof HTMLButtonElement)) return false;
-      if (!setComposerText(composer, AUTO_CONTINUE_TEXT)) return false;
+      if (!(initialButton instanceof HTMLButtonElement)) return { attempted: false, sent: false };
+      if (!setComposerText(composer, AUTO_CONTINUE_TEXT)) return { attempted: false, sent: false };
       const deadline = Date.now() + 1200;
       while (Date.now() < deadline) {
-        if (!composer.isConnected || composerText(composer) !== AUTO_CONTINUE_TEXT) return false;
+        if (!composer.isConnected || composerText(composer) !== AUTO_CONTINUE_TEXT) {
+          return { attempted: true, sent: false };
+        }
         const button = findSendButton(composer);
         if (isEnabledButton(button)) {
           button.click();
-          return true;
+          return { attempted: true, sent: true };
         }
         await new Promise((resolve) => setTimeout(resolve, 60));
       }
       clearAutoContinueDraft(composer);
-      return false;
+      return { attempted: true, sent: false };
     }
 
     async function runAutoContinueCheck() {
@@ -2127,13 +2566,13 @@
 
       state.autoContinueSending = true;
       try {
-        const sent = await submitAutoContinue(composer);
-        // An automatic attempt is single-shot per assistant turn. If ChatGPT's
-        // send control stays disabled, the draft cleanup mutates the composer;
-        // without recording the key those mutations can immediately schedule
-        // the same attempt again and create a focus/typing loop.
-        rememberAutoContinueKey(key);
-        if (sent) state.stats.autoContinues += 1;
+        const result = await submitAutoContinue(composer);
+        // Once Stability Guard actually writes the continuation draft, this is
+        // a single-shot attempt for that assistant turn. Draft cleanup mutates
+        // the composer too, so leaving the key unhandled on a disabled Send
+        // button would immediately schedule the same attempt again.
+        if (result.attempted) rememberAutoContinueKey(key);
+        if (result.sent) state.stats.autoContinues += 1;
       } finally {
         state.autoContinueSending = false;
       }
@@ -2179,8 +2618,9 @@
       toggleClass('csg-compact-traces', state.settings.compactTraces);
       toggleClass('csg-reduce-motion', state.settings.reduceMotion);
       toggleClass('csg-lazy-heavy', state.settings.lazyHeavyBlocks);
-        toggleClass('csg-freeze-old', state.settings.freezeOldTurns);
-        if (!state.settings.enabled || !state.settings.hideToolSummary) {
+      toggleClass('csg-freeze-old', state.settings.freezeOldTurns);
+      bindVirtualSpacerObserver();
+      if (!state.settings.enabled || !state.settings.hideToolSummary) {
         clearTimeout(state.toolCleanupTimer);
         state.toolCleanupTimer = 0;
         stopSummaryLiveObservation();
@@ -2205,6 +2645,8 @@
         state.toolSummaryInitialSweepQueued = new WeakSet();
         state.toolSummaryFallbackSweepPending = new WeakSet();
         state.toolSummaryFallbackSweepCursor = new WeakMap();
+        state.toolSummaryShellSweepRoots.clear();
+        state.toolSummaryShellSweepScheduled = false;
       }
       if (!state.settings.enabled || !state.settings.hideToolEmbeds) {
         clearAllPreviewSurfaces();
@@ -2228,6 +2670,13 @@
       updateStatus();
       if (!state.settings.enabled) return;
       if (state.settings.hideToolEmbeds) scanPreviewSurfaces(document.body);
+      if (state.settings.hideToolSummary) {
+        // Prehide can make current MCP rows 0px before JS owns them. Sweep only
+        // their parent shells in small idle batches so every mounted historical
+        // turn loses redundant flex gaps without promoting all rows to JS markers.
+        document.querySelectorAll(TURN_SELECTOR).forEach((turn) =>
+          scheduleHistoricalToolSummaryShellSweep(turn));
+      }
       if (needsGeneralMutationScan()) {
         // Seed the live boundary synchronously before the document observer is
         // attached. This removes the short startup window where a classless

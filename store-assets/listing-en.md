@@ -12,7 +12,7 @@ Long ChatGPT threads can become sluggish and visually crowded as old turns, Thin
 Everything runs in your browser on `chatgpt.com`: no conversation uploads, ads, analytics, telemetry, developer backend, remote configuration, or remote code.
 
 Highlights:
-- Optionally keep only the most recent N exchanges visible (off by default; N defaults to 3)
+- Optionally keep the latest N exchanges visible and fold earlier history into an accordion (off by default; N defaults to 3)
 - Hide Thinking / reasoning UI
 - Hide passive MCP / tool traces and summary chrome such as "Called tool"
 - Preserve live App, Connect, authentication, and Retry controls instead of hiding their parent UI
@@ -24,7 +24,7 @@ Highlights:
 - Show counts of elements currently hidden or deferred
 - Toggle each optimization independently
 
-Recent-N is designed around ChatGPT's virtualized conversation UI. If a branch edit or major virtual-scroll structure change makes the safe boundary uncertain, only recent-N fails open for that page instead of forcing the scroll position; reloading rebuilds the boundary.
+The recent-N accordion is designed around ChatGPT's virtualized conversation UI. While collapsed it keeps the latest N semantic boundary; expanding restores normal history scrolling, and collapsing again reacquires the boundary. If a branch edit or major virtual-scroll structure change makes that boundary unsafe, only recent-N fails open.
 
 ### Compatibility
 This extension is implemented against the current ChatGPT web UI and its DOM/attribute structure. If ChatGPT changes its site markup or UI, some or all detection, hiding, or placeholder suppression can temporarily stop working until the extension is updated.

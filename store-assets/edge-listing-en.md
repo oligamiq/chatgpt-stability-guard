@@ -12,7 +12,7 @@ Long ChatGPT threads can become sluggish and visually crowded as old turns, Thin
 Everything runs in your browser on `chatgpt.com`: no conversation uploads, ads, analytics, telemetry, developer backend, remote configuration, or remote code.
 
 Highlights:
-- Optionally keep only the most recent N exchanges visible (off by default; N=3)
+- Optionally keep the latest N exchanges visible and fold earlier history into an accordion (off by default; N=3)
 - Hide Thinking / reasoning UI
 - Hide passive MCP / tool traces and tool-summary rows
 - Preserve live App, Connect, authentication, and Retry controls
