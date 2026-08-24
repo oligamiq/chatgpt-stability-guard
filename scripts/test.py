@@ -19,6 +19,7 @@ def main():
         raise SystemExit('Node.js not found')
     for script in ('content.js', 'recent-window.js', 'popup.js', 'prehide.js', 'privacy.js'):
         run(node, '--check', script)
+    run(node, '--check', 'scripts/live_site_smoke.mjs')
     run(sys.executable, 'scripts/test_old_app_errors.py')
     run(sys.executable, 'scripts/test_recent_window.py')
     run(sys.executable, 'scripts/test_loading_indicator.py')
@@ -29,6 +30,8 @@ def main():
     run(sys.executable, 'scripts/test_summary_history_stress.py')
     run(sys.executable, 'scripts/test_virtual_spacer_compaction.py')
     run(sys.executable, 'scripts/test_package.py')
+    run(sys.executable, 'scripts/test_live_site_contract.py')
+    run(sys.executable, 'scripts/test_live_site_smoke.py')
     print('ALL TESTS OK')
 
 

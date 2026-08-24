@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "turn_tags": [
+    "section"
+  ],
+  "turn_roles": [
+    "assistant",
+    "user"
+  ],
+  "turn_stable_attr_sets": [
+    [
+      "data-testid",
+      "data-turn",
+      "data-turn-id",
+      "data-turn-id-container",
+      "dir"
+    ]
+  ],
+  "turn_to_scroll_root_paths": [
+    [
+      {
+        "attrs": [
+          "data-testid",
+          "data-turn",
+          "data-turn-id",
+          "data-turn-id-container",
+          "dir"
+        ],
+        "dependency_classes": [],
+        "tag": "section"
+      },
+      {
+        "attrs": [
+          "data-turn-id-container"
+        ],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "main"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [],
+        "tag": "div"
+      },
+      {
+        "attrs": [],
+        "dependency_classes": [
+          "group/scroll-root"
+        ],
+        "tag": "div"
+      }
+    ]
+  ],
+  "scroll_root_tags": [
+    "div"
+  ],
+  "dependency_class_presence": {
+    "agent-turn": true,
+    "group/scroll-root": true,
+    "group/tool-message": false,
+    "markdown": true,
+    "no-scrollbar": false
+  },
+  "all_turn_ids_numeric": true
+}

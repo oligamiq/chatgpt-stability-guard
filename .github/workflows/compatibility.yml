@@ -1,0 +1,240 @@
+name: Compatibility Guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-guard-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      regression: ${{ steps.outcomes.outputs.regression }}
+      live: ${{ steps.outcomes.outputs.live }}
+      live_reportable: ${{ steps.outcomes.outputs.live_reportable }}
+
+    steps:
+      - name: Check out repository
+        id: checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        id: setup_node
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Show runtime versions
+        continue-on-error: true
+        run: |
+          python3 --version
+          node --version
+          google-chrome --version
+
+      - name: Run extension regression suite
+        id: regression
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.setup_node.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          python3 scripts/test.py 2>&1 | tee artifacts/regression-tests.log
+
+      - name: Check live ChatGPT compatibility
+        id: live
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.setup_node.outcome == 'success' && github.event_name != 'pull_request' }}
+        continue-on-error: true
+        env:
+          CSG_LIVE_CHAT_URL: ${{ vars.CSG_LIVE_CHAT_URL || 'https://chatgpt.com/share/6a71b843-4fcc-83eb-8eb5-42706097b7e0' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          contract_rc=0
+          smoke_rc=0
+          python3 scripts/live_site_contract.py 2>&1 | tee artifacts/live-site-contract.log || contract_rc=$?
+          node scripts/live_site_smoke.mjs 2>&1 | tee artifacts/live-site-smoke.log || smoke_rc=$?
+          reportable=false
+          if [[ "$contract_rc" -eq 2 || "$smoke_rc" -eq 2 ]]; then
+            reportable=true
+          fi
+          echo "reportable=$reportable" >> "$GITHUB_OUTPUT"
+          echo "contract_rc=$contract_rc" >> "$GITHUB_OUTPUT"
+          echo "smoke_rc=$smoke_rc" >> "$GITHUB_OUTPUT"
+          if [[ "$contract_rc" -ne 0 || "$smoke_rc" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Upload compatibility diagnostics
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && github.event_name != 'pull_request' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatibility-diagnostics-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Record outcomes
+        id: outcomes
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "regression=${{ steps.regression.outcome }}" >> "$GITHUB_OUTPUT"
+          echo "live=${{ steps.live.outcome }}" >> "$GITHUB_OUTPUT"
+          echo "live_reportable=${{ steps.live.outputs.reportable }}" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce pull request regression result
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+        run: |
+          if [[ "$REGRESSION_OUTCOME" != "success" ]]; then
+            echo "Extension regression suite outcome: $REGRESSION_OUTCOME"
+            exit 1
+          fi
+          echo "Pull request regression suite passed."
+
+  report:
+    needs: compatibility
+    if: ${{ always() && !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update compatibility issue
+        if: ${{ needs.compatibility.outputs.regression == 'failure' || (needs.compatibility.outputs.live == 'failure' && needs.compatibility.outputs.live_reportable == 'true') }}
+        uses: actions/github-script@v9
+        env:
+          REGRESSION_OUTCOME: ${{ needs.compatibility.outputs.regression }}
+          LIVE_OUTCOME: ${{ needs.compatibility.outputs.live }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CSG_REF: ${{ github.ref }}
+          CSG_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const title = '[CI] ChatGPT site compatibility regression';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            async function ensureLabel(name, color, description) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                }
+              }
+            }
+
+            await ensureLabel('automated', '6f42c1', 'Created and maintained automatically by CI');
+            await ensureLabel('site-compatibility', 'd73a4a', 'ChatGPT Web compatibility or DOM contract changed');
+
+            const body = [
+              'The automated compatibility guard detected a failure.',
+              '',
+              `- Extension regression suite: **${process.env.REGRESSION_OUTCOME || 'unknown'}**`,
+              `- Live ChatGPT core contract + smoke: **${process.env.LIVE_OUTCOME || 'unknown'}**`,
+              `- Ref: ${process.env.CSG_REF}`,
+              `- Commit: ${process.env.CSG_SHA}`,
+              `- Workflow run: ${process.env.RUN_URL}`,
+              `- Diagnostics artifact: compatibility-diagnostics-${process.env.RUN_ID}`,
+              '',
+              'The live-site artifacts contain normalized structure/state metrics and logs; conversation text is not stored.',
+            ].join('\n');
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: 'automated,site-compatibility',
+              per_page: 100,
+            });
+            const existing = openIssues.find(issue => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: existing.number, body });
+              core.notice(`Updated existing compatibility issue #${existing.number}`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['automated', 'site-compatibility'],
+              });
+              core.notice(`Created compatibility issue #${created.number}`);
+            }
+
+      - name: Close recovered compatibility issue
+        if: ${{ needs.compatibility.outputs.regression == 'success' && needs.compatibility.outputs.live == 'success' }}
+        uses: actions/github-script@v9
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const title = '[CI] ChatGPT site compatibility regression';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              labels: 'automated,site-compatibility',
+              per_page: 100,
+            });
+            const existing = openIssues.find(issue => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body: `Compatibility checks recovered successfully.\n\nWorkflow run: ${process.env.RUN_URL}`,
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+            }
+
+
+      - name: Enforce reported compatibility result
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          REGRESSION_OUTCOME: ${{ needs.compatibility.outputs.regression }}
+          LIVE_OUTCOME: ${{ needs.compatibility.outputs.live }}
+        run: |
+          failed=0
+          if [[ "$REGRESSION_OUTCOME" == "failure" ]]; then
+            echo "Extension regression suite failed."
+            failed=1
+          fi
+          if [[ "$LIVE_OUTCOME" == "failure" ]]; then
+            echo "Live ChatGPT compatibility check failed."
+            failed=1
+          fi
+          if [[ "$failed" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "No reportable compatibility failure."
