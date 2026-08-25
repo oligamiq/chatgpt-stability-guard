@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.24 — 2026-08-25
+
+- Added a document-start fast-load path for recent-N: older mounted turns are marked as soon as their provisional boundary is known so their subtree rendering can be skipped before the full runtime initializes.
+- Kept ChatGPT/React-owned turn nodes in place and avoided zero-height bootstrap collapse; the provisional phase uses `content-visibility: hidden` with a temporary intrinsic estimate only to avoid triggering virtualizer over-mounting, then removes that estimate before the final compact accordion state.
+- Removed initialization-time scroll-host discovery and scroll writes. Loading/streaming mutations are coalesced without rescanning on inner token updates, and the final scroll correction is performed exactly once after structural activity and generation have settled.
+- Added regression coverage proving the bootstrap path does not use `display: none`, ignores repeated streaming-only inner mutations, clears all provisional markers before ready, writes `scrollTop` once after initial load, and never clamps later user scrolling.
+- Re-ran the complete validation, recent-window, loading, Auto Continue, Tool/App isolation, generation-completion, stress, packaging, live-site contract, and smoke suites successfully.
+
+## 1.0.23 — 2026-08-25
+
+- Improved recent-N loading progress so the indicator distinguishes mounted/confirmed exchanges, short complete histories, provisional share-page boundaries, and final boundary application instead of overstating readiness.
+- Simplified recent-window discovery to learn only already-mounted ChatGPT turns; initialization no longer programmatically scrolls through older history to discover it.
+- Hardened per-chat accordion behavior around sparse virtualized windows, branch/identity changes, root-class replacement, recycled turn nodes, and assistant-only historical fragments while keeping ambiguous cases fail-open.
+- Added targeted loading-indicator, recent-window, and live-site regression coverage for the updated behavior.
+
 ## 1.0.22 — 2026-08-25
 
 - Removed the residual blank gap between a completed thinking header and assistant response when many historical MCP `Called tool` rows were already prehidden to 0px but their outer `group/tool-message` flex items still consumed one parent `gap-4` slot each.

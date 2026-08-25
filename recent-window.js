@@ -5,6 +5,16 @@
   const ROOT = document.documentElement;
   const DEFAULTS = { enabled: true, showRecentOnly: false, recentExchanges: 3 };
   const LOADING_WATCHDOG_MS = 60000;
+  const INITIAL_SETTLE_MS = 450;
+  const STOP_GENERATING_SELECTOR = [
+    'button[data-testid="stop-button"]',
+    'button[data-testid="stop-generating-button"]',
+    'button[aria-label="Stop generating" i]',
+    'button[aria-label="Stop answering" i]',
+    'button[aria-label="Stop response" i]',
+    'button[aria-label*="生成を停止"]',
+    'button[aria-label*="応答を停止"]'
+  ].join(',');
 
   const state = {
     active: false,
@@ -46,6 +56,9 @@
     bottomTailEvidence: null,
     loadingRemoveTimer: 0,
     loadingWatchdogTimer: 0,
+    initialFinalized: false,
+    finalizeTimer: 0,
+    finalScrollCorrections: 0,
     uiLanguage: 'auto'
   };
 
@@ -57,6 +70,8 @@
       state.active = merged.enabled !== false && merged.showRecentOnly === true;
       state.n = Math.max(1, Math.min(100, Number(merged.recentExchanges) || 3));
       if (!state.active) {
+        ROOT.dataset.csgRecentRuntime = '1';
+        clearProvisionalFold();
         publishState('off');
         return;
       }
@@ -785,6 +800,25 @@
     return button;
   }
 
+  function applyProvisionalFold() {
+    if (!state.active || state.initialFinalized || state.suspended) return;
+    ROOT.classList.add('csg-prehide-recent-fast');
+    const items = currentWindow();
+    const starts = [];
+    items.forEach((item, index) => {
+      if (item.role === 'user') starts.push(index);
+    });
+    const boundaryIndex = starts.length > state.n ? starts[starts.length - state.n] : -1;
+    items.forEach((item, index) => {
+      item.turn.toggleAttribute('data-csg-prehide-old-turn', boundaryIndex > 0 && index < boundaryIndex);
+    });
+  }
+
+  function clearProvisionalFold() {
+    document.querySelectorAll('[data-csg-prehide-old-turn]').forEach((turn) => turn.removeAttribute('data-csg-prehide-old-turn'));
+    ROOT.classList.remove('csg-prehide-recent-fast');
+  }
+
   function markTurnElement(turn) {
     if (!(turn instanceof Element)) return false;
     const key = turnKey(turn);
@@ -855,6 +889,29 @@
 
   function scrollHeight() {
     return state.scrollHost?.scrollHeight || document.documentElement.scrollHeight || 0;
+  }
+
+  function scheduleFinalScrollCorrection() {
+    if (!state.active || !state.ready || state.suspended || state.finalScrollCorrections > 0) return;
+    clearTimeout(state.finalizeTimer);
+    const epoch = state.epoch;
+    state.finalizeTimer = setTimeout(() => {
+      state.finalizeTimer = 0;
+      if (!isCurrentEpoch(epoch) || !state.ready || state.suspended || state.finalScrollCorrections > 0) return;
+      if (document.querySelector(STOP_GENERATING_SELECTOR)) {
+        scheduleFinalScrollCorrection();
+        return;
+      }
+      const turns = getTurns();
+      if (!turns.length) return;
+      state.scrollHost = findScrollHost(turns[turns.length - 1]);
+      attachScrollHost();
+      const host = state.scrollHost;
+      if (!host) return;
+      host.scrollTop = host.scrollHeight;
+      state.finalScrollCorrections += 1;
+      ROOT.dataset.csgRecentFinalScrollCorrections = String(state.finalScrollCorrections);
+    }, INITIAL_SETTLE_MS);
   }
 
   function findScrollHost(turn) {
@@ -934,6 +991,8 @@
   }
 
   function failOpenRecent() {
+    clearTimeout(state.finalizeTimer);
+    state.finalizeTimer = 0;
     state.ready = false;
     state.recovering = false;
     state.suspended = true;
@@ -966,15 +1025,15 @@
         return;
       }
 
-      state.scrollHost = findScrollHost(turns[turns.length - 1]);
-      attachScrollHost();
       updateLoadingIndicator('latest');
+      applyProvisionalFold();
 
       // Learn only what ChatGPT has already mounted. Recent-N must never scroll
       // the host just to discover older history; native/user scrolling will
       // progressively extend state.sequence later through refreshStructure().
       for (let pass = 0; pass < 3; pass += 1) {
         mergeWindow(currentWindow());
+        applyProvisionalFold();
         if (pass < 2) await wait(70);
         if (!isCurrentEpoch(epoch)) return;
       }
@@ -1015,12 +1074,15 @@
       }
 
       state.ready = true;
+      state.initialFinalized = true;
+      clearProvisionalFold();
       ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
       markMountedTurns();
       updateAccordion();
       updateMinimum();
       if (!isCurrentEpoch(epoch) || !state.ready || state.suspended) return;
       publishState('ready');
+      scheduleFinalScrollCorrection();
     } catch (_error) {
       if (isCurrentEpoch(epoch)) failOpenRecent();
     } finally {
@@ -1168,11 +1230,12 @@
       return;
     }
     mergeWindow(mountedWindow);
-    if (state.ready && bottomTailDiverged(mountedWindow)) {
+    if (state.ready && state.scrollHost && bottomTailDiverged(mountedWindow)) {
       failOpenRecent();
       return;
     }
     if (!state.ready) {
+      applyProvisionalFold();
       if (!state.recovering && !state.initializing) discoverBoundary();
       return;
     }
@@ -1249,8 +1312,15 @@
           }
         }
       }
-      if (structureChanged) scheduleStructureRefresh();
-      if (recentContentChanged) scheduleContentRefresh();
+      if (structureChanged) {
+        if (!state.initialFinalized) applyProvisionalFold();
+        scheduleStructureRefresh();
+        if (state.ready && state.finalScrollCorrections === 0) scheduleFinalScrollCorrection();
+      }
+      if (recentContentChanged) {
+        scheduleContentRefresh();
+        if (state.ready && state.finalScrollCorrections === 0) scheduleFinalScrollCorrection();
+      }
     });
     state.observer.observe(document.documentElement, {
       childList: true,
@@ -1305,6 +1375,7 @@
     document.querySelectorAll('.csg-hidden-old-turn').forEach((turn) => turn.classList.remove('csg-hidden-old-turn'));
     document.querySelectorAll('.csg-chat-collapsed').forEach((turn) => turn.classList.remove('csg-chat-collapsed'));
     document.querySelectorAll('.csg-chat-toggle').forEach((button) => button.remove());
+    clearProvisionalFold();
   }
 
   function resetForRoute() {
@@ -1313,7 +1384,9 @@
     clearTimeout(state.contentTimer);
     clearTimeout(state.roleConfirmTimer);
     clearTimeout(state.loadingRemoveTimer);
+    clearTimeout(state.finalizeTimer);
     state.loadingRemoveTimer = 0;
+    state.finalizeTimer = 0;
     clearLoadingWatchdog();
     removeLoadingIndicator(false);
     state.scheduled = 0;
@@ -1327,6 +1400,9 @@
     clearMountedMarks();
     detachScrollHost();
     state.ready = false;
+    state.initialFinalized = false;
+    state.finalScrollCorrections = 0;
+    delete ROOT.dataset.csgRecentFinalScrollCorrections;
     state.sequence = [];
     state.roles.clear();
     state.assistantContent.clear();
@@ -1351,6 +1427,8 @@
     state.bottomTailEvidence = null;
     delete ROOT.dataset.csgRecentMode;
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
+    ROOT.classList.add('csg-prehide-recent-fast');
+    applyProvisionalFold();
     publishState('preparing');
     armLoadingWatchdog();
   }
@@ -1363,6 +1441,9 @@
   }
 
   function start() {
+    ROOT.dataset.csgRecentRuntime = '1';
+    ROOT.classList.add('csg-prehide-recent-fast');
+    applyProvisionalFold();
     publishState('preparing');
     armLoadingWatchdog();
     attachObserver();

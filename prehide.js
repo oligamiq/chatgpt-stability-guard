@@ -72,6 +72,64 @@
       }, 12000);
     }
 
+    function fastTurnRole(turn) {
+      const direct = turn.getAttribute('data-message-author-role') || turn.getAttribute('data-turn');
+      if (direct === 'user' || direct === 'assistant') return direct;
+      const nested = turn.querySelector('[data-message-author-role],[data-turn="user"],[data-turn="assistant"]');
+      const role = nested?.getAttribute('data-message-author-role') || nested?.getAttribute('data-turn');
+      return role === 'user' || role === 'assistant' ? role : '';
+    }
+
+    function installRecentFastPrehide(total) {
+      if (!isConversationRoute()) return;
+      root.classList.add('csg-prehide-recent-fast');
+      let scheduled = false;
+      const fold = () => {
+        scheduled = false;
+        if (root.dataset.csgRecentRuntime === '1') {
+          observer.disconnect();
+          return;
+        }
+        const turns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
+        const starts = [];
+        turns.forEach((turn, index) => {
+          if (fastTurnRole(turn) === 'user') starts.push(index);
+        });
+        const boundaryIndex = starts.length > total ? starts[starts.length - total] : -1;
+        turns.forEach((turn, index) => {
+          turn.toggleAttribute('data-csg-prehide-old-turn', boundaryIndex > 0 && index < boundaryIndex);
+        });
+      };
+      const schedule = () => {
+        if (scheduled) return;
+        scheduled = true;
+        setTimeout(fold, 0);
+      };
+      const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.type === 'attributes') {
+            schedule();
+            return;
+          }
+          for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches('[data-testid^="conversation-turn-"]') ||
+                node.querySelector?.('[data-testid^="conversation-turn-"]')) {
+              schedule();
+              return;
+            }
+          }
+        }
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-csg-recent-runtime']
+      });
+      schedule();
+    }
+
     chrome.storage.local.get({ settings: {} }, ({ settings }) => {
       const loaded = normalizeSettings(settings);
       root.classList.toggle(
@@ -80,6 +138,7 @@
       );
       if (loaded.enabled && loaded.showRecentOnly) {
         ensureRecentLoading(loaded.recentExchanges);
+        installRecentFastPrehide(loaded.recentExchanges);
       }
       // Placeholder prehide intentionally remains fail-open. Current ChatGPT
       // `.no-scrollbar` mounts can bootstrap a real App later, so document_start

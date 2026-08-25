@@ -619,15 +619,21 @@ Object.defineProperty(scrollProbe,'scrollTop',{
 const noScan=setInterval(()=>{
   if(document.documentElement.dataset.csgRecentState!=='ready') return;
   clearInterval(noScan);
-  if(window.__csgScrollWrites===0) document.getElementById('scroll').dataset.csgNoAutoScan='1';
+  const writesAtReady=window.__csgScrollWrites;
+  setTimeout(()=>{
+    if(writesAtReady===0 && window.__csgScrollWrites===1 &&
+       document.documentElement.dataset.csgRecentFinalScrollCorrections==='1') {
+      document.getElementById('scroll').dataset.csgOneFinalScroll='1';
+    }
+  },900);
 },100);
 '''
     run_case(
-        'per-chat-initialization-never-writes-scrolltop',
-        '/c/per-chat-no-auto-scan/',
+        'per-chat-scroll-corrects-once-after-initial-load',
+        '/c/per-chat-one-final-scroll/',
         accordion_body,
         [
-            {'name':'no-programmatic-scroll-during-init','selector':'#scroll[data-csg-no-auto-scan="1"]','hidden':False},
+            {'name':'one-final-scroll-after-ready','selector':'#scroll[data-csg-one-final-scroll="1"]','hidden':False},
             {'name':'old-user-folded','selector':'[data-testid="conversation-turn-0"]','hidden':True},
         ],
         n=2,
@@ -641,7 +647,7 @@ const noScan=setInterval(()=>{
 
     native_scroll_after = r'''
 const nativeScroll=setInterval(()=>{
-  if(document.documentElement.dataset.csgRecentState!=='ready') return;
+  if(document.documentElement.dataset.csgRecentFinalScrollCorrections!=='1') return;
   clearInterval(nativeScroll);
   document.getElementById('scroll').scrollTop=0;
 },100);

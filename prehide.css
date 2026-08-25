@@ -131,6 +131,15 @@ html.csg-prehide-tool-summary button:not(.csg-tool-summary):not(.csg-tool-summar
   color: transparent !important;
 }
 
+/* Bootstrap-only: skip old-turn rendering while keeping a temporary estimate so
+   ChatGPT's virtualizer does not interpret every hidden turn as zero height.
+   recent-window.js removes this state before the final compact accordion UI. */
+html.csg-prehide-recent-fast [data-csg-prehide-old-turn] {
+  content-visibility: hidden !important;
+  contain-intrinsic-size: auto 320px;
+  pointer-events: none !important;
+}
+
 #csg-recent-loading {
   position: fixed;
   left: 50%;
