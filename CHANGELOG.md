@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.25 — 2026-08-25
+
+- Replaced repeated whole-conversation turn discovery with incremental mounted-turn registries in the document-start prehide path, recent-N controller, and main content runtime. Each runtime seeds mounted turns once, then tracks additions, removals, recycling, and ordering from structural mutations.
+- Narrowed Recent-N, general content, and virtual-spacer MutationObservers to the mounted conversation container instead of observing the entire ChatGPT document; route/root recovery remains bounded and generation/composer state is observed separately.
+- Made collapsed Recent-N turns publish an explicit analysis-suppression state. Thinking/Tool/App/error/preview scanning and related observers now skip those old turns entirely, while expanding a chat immediately resumes the normal analysis pipeline for that turn.
+- Added direct performance regressions proving dynamic turns do not cause another whole-document turn query, observers bind to the thread container, a collapsed old turn receives zero internal analysis queries, and expansion resumes classification correctly.
+- Preserved CSS-only historical Tool-summary behavior under a 700-row stress fixture and re-ran the complete validation, Recent-N, loading, Auto Continue, Tool/App isolation, virtual-spacer, package, live-site contract, and smoke suites successfully.
+
 ## 1.0.24 — 2026-08-25
 
 - Added a document-start fast-load path for recent-N: older mounted turns are marked as soon as their provisional boundary is known so their subtree rendering can be skipped before the full runtime initializes.

@@ -78,6 +78,11 @@
       oldAppStableTurns: new Map(),
       latestTurnIndex: -1,
       liveProtectedTurns: new Set(),
+      mountedTurns: new Set(),
+      mountedTurnsOrder: [],
+      mountedTurnsDirty: true,
+      mainObserverRoot: null,
+      observerRouteKey: location.pathname + location.search,
       scheduled: false,
       freezeTimer: 0,
       toolCleanupTimer: 0,
@@ -158,6 +163,83 @@
     }
 
     const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+
+    function registerMountedTurn(turn) {
+      if (!(turn instanceof Element) || !turn.matches(TURN_SELECTOR)) return false;
+      if (state.mountedTurns.has(turn)) return false;
+      state.mountedTurns.add(turn);
+      state.mountedTurnsDirty = true;
+      return true;
+    }
+
+    function unregisterMountedTurn(turn) {
+      if (!(turn instanceof Element) || !state.mountedTurns.delete(turn)) return false;
+      state.mountedTurnsDirty = true;
+      return true;
+    }
+
+    function registerTurnsInNode(node) {
+      if (!(node instanceof Element)) return false;
+      let changed = registerMountedTurn(node);
+      node.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => { changed = registerMountedTurn(turn) || changed; });
+      return changed;
+    }
+
+    function unregisterTurnsInNode(node) {
+      if (!(node instanceof Element)) return false;
+      let changed = unregisterMountedTurn(node);
+      node.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => { changed = unregisterMountedTurn(turn) || changed; });
+      return changed;
+    }
+
+    function seedMountedTurns() {
+      state.mountedTurns.clear();
+      document.querySelectorAll(TURN_SELECTOR).forEach((turn) => state.mountedTurns.add(turn));
+      state.mountedTurnsDirty = true;
+    }
+
+    function getTurns() {
+      if (!state.mountedTurnsDirty) return state.mountedTurnsOrder;
+      const ordered = [...state.mountedTurns].filter((turn) => turn.isConnected && turn.matches(TURN_SELECTOR));
+      ordered.sort((a, b) => {
+        if (a === b) return 0;
+        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+      state.mountedTurns = new Set(ordered);
+      state.mountedTurnsOrder = ordered;
+      state.mountedTurnsDirty = false;
+      return ordered;
+    }
+
+    function mainConversationObserverRoot() {
+      const turns = getTurns();
+      if (!turns.length) return document.documentElement;
+      let candidate = turns[0].parentElement || document.documentElement;
+      const last = turns[turns.length - 1];
+      while (candidate !== document.documentElement && !candidate.contains(last)) {
+        candidate = candidate.parentElement || document.documentElement;
+      }
+      return candidate;
+    }
+
+    function bindMainObserverRoot() {
+      const next = mainConversationObserverRoot();
+      if (state.mainObserverRoot === next && next?.isConnected) return;
+      observer.disconnect();
+      state.mainObserverRoot = next;
+      observer.observe(next, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: [
+          'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
+          'aria-modal', 'aria-label', 'aria-expanded', 'title'
+        ]
+      });
+      if (state.virtualSpacerObserver) bindVirtualSpacerObserver();
+    }
     const SEMANTIC_ACTION_SELECTOR = [
       'a[href]', 'button', 'input:not([type="hidden"])', 'select', 'textarea', 'summary',
       '[contenteditable]:not([contenteditable="false"])', '[role="button"]', '[role="link"]',
@@ -170,6 +252,17 @@
 
     function isConversationTurnScoped(el) {
       return el instanceof Element && Boolean(el.closest(TURN_SELECTOR));
+    }
+
+    function recentSuppressedTurn(element) {
+      if (!state.settings.enabled || !state.settings.showRecentOnly || !(element instanceof Element)) return null;
+      const turn = element.matches(TURN_SELECTOR) ? element : element.closest(TURN_SELECTOR);
+      if (!(turn instanceof Element)) return null;
+      return turn.hasAttribute('data-csg-prehide-old-turn') || turn.hasAttribute('data-csg-recent-old') ? turn : null;
+    }
+
+    function isRecentAnalysisSuppressed(element) {
+      return recentSuppressedTurn(element) instanceof Element;
     }
 
     const VIRTUAL_SPACER_SELECTOR = '[class*="--last-known-height"][class*="--estimated-turn-height"]';
@@ -478,7 +571,7 @@
         });
       }
       state.virtualSpacerObserver.disconnect();
-      state.virtualSpacerObserver.observe(document.documentElement, { childList: true, subtree: true });
+      state.virtualSpacerObserver.observe(mainConversationObserverRoot(), { childList: true, subtree: true });
       if (!state.virtualSpacerScrollBound) {
         state.virtualSpacerScrollBound = true;
         document.addEventListener('wheel', () => noteVirtualSpacerUserIntent(document.scrollingElement), { capture: true, passive: true });
@@ -704,13 +797,13 @@
 
     function mountedLatestTurnIndex() {
       let latest = -1;
-      for (const turn of document.querySelectorAll(TURN_SELECTOR)) {
+      for (const turn of getTurns()) {
         latest = Math.max(latest, turnIndexFromId(turnId(turn)));
       }
       return latest;
     }
 
-    function computeLatestBoundaryTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+    function computeLatestBoundaryTurns(latestIndex, turns = [...getTurns()]) {
       const protectedTurns = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
       for (const turn of turns) {
         const index = turnIndexFromId(turnId(turn));
@@ -721,7 +814,7 @@
       return protectedTurns;
     }
 
-    function computeLiveProtectedTurns(latestIndex, turns = [...document.querySelectorAll(TURN_SELECTOR)]) {
+    function computeLiveProtectedTurns(latestIndex, turns = [...getTurns()]) {
       return isGenerationActive() ? computeLatestBoundaryTurns(latestIndex, turns) : new Set();
     }
 
@@ -737,7 +830,7 @@
     }
 
     function queueLiveProtectionBoundaryChanges(latestTurnIndex) {
-      const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+      const turns = [...getTurns()];
       const nextProtectedTurns = computeLiveProtectedTurns(latestTurnIndex, turns);
       const changedTurns = turns.filter((turn) =>
         state.liveProtectedTurns.has(turn) !== nextProtectedTurns.has(turn)
@@ -868,11 +961,11 @@
     }
 
     function routeTurnSnapshot() {
-      return new Map([...document.querySelectorAll(TURN_SELECTOR)].map((turn) => [turn, routeTurnIdentity(turn)]));
+      return new Map([...getTurns()].map((turn) => [turn, routeTurnIdentity(turn)]));
     }
 
     function routeTurnSnapshotChanged() {
-      const current = [...document.querySelectorAll(TURN_SELECTOR)];
+      const current = [...getTurns()];
       if (current.length !== state.oldAppRoutePreviousTurns.size) return true;
       const currentSet = new Set(current);
       for (const [turn, identity] of state.oldAppRoutePreviousTurns) {
@@ -958,7 +1051,7 @@
       // Current ChatGPT turn IDs are numeric. If the site moves to opaque IDs,
       // this feature intentionally fails open instead of guessing the latest turn.
       let mountedMax = -1;
-      for (const turn of document.querySelectorAll(TURN_SELECTOR)) {
+      for (const turn of getTurns()) {
         mountedMax = Math.max(mountedMax, turnIndexFromId(turnId(turn)));
       }
       // Use only the currently provable maximum. Keeping a historical maximum
@@ -1536,7 +1629,7 @@
     }
 
     function trackPreviewIframe(iframe) {
-      if (!state.settings.enabled || !state.settings.hideToolEmbeds || !isPreviewSurfaceIframe(iframe)) return;
+      if (!state.settings.enabled || !state.settings.hideToolEmbeds || isRecentAnalysisSuppressed(iframe) || !isPreviewSurfaceIframe(iframe)) return;
       const parts = previewSurfaceParts(iframe);
       if (!parts) return;
       let entry = state.previewSurfaces.get(iframe);
@@ -1553,7 +1646,7 @@
     function scanPreviewSurfaces(scanRoot) {
       if (!state.settings.enabled || !state.settings.hideToolEmbeds) return;
       const rootElement = scanRoot instanceof Element ? scanRoot : scanRoot?.parentElement;
-      if (!(rootElement instanceof Element)) return;
+      if (!(rootElement instanceof Element) || isRecentAnalysisSuppressed(rootElement)) return;
       if (rootElement.matches(PREVIEW_IFRAME_SELECTOR)) trackPreviewIframe(rootElement);
       rootElement.querySelectorAll?.(PREVIEW_IFRAME_SELECTOR).forEach(trackPreviewIframe);
       const mount = rootElement.closest?.('.no-scrollbar');
@@ -1920,7 +2013,7 @@
     }
 
     function classifyToolChromeCandidate(el, latestTurnIndex, summaryAlreadyApplied = false) {
-      if (!(el instanceof Element) || el.closest('.markdown') || !isConversationTurnScoped(el)) return;
+      if (!(el instanceof Element) || isRecentAnalysisSuppressed(el) || el.closest('.markdown') || !isConversationTurnScoped(el)) return;
       // Legacy disclosures can expose the summary only through aria-label/title
       // with no visible text node. Use the control-aware label path for actual
       // disclosure candidates; generic wrappers still use bounded visible text.
@@ -1962,7 +2055,7 @@
     function fastClassifyToolSummaryMutation(node, applyNow = true) {
       if (!state.settings.enabled || !state.settings.hideToolSummary) return [];
       const element = node instanceof Element ? node : node?.parentElement;
-      if (!(element instanceof Element) || !isConversationTurnScoped(element) || element.closest('.markdown')) return [];
+      if (!(element instanceof Element) || isRecentAnalysisSuppressed(element) || !isConversationTurnScoped(element) || element.closest('.markdown')) return [];
       const roots = [element];
       let cursor = element;
       for (let i = 0; i < 2; i += 1) {
@@ -2010,7 +2103,7 @@
       if (!state.settings.enabled || !state.settings.hideToolSummary) return;
       if (node instanceof Node) {
         const element = node instanceof Element ? node : node.parentElement;
-        if (!(element instanceof Element) || element.closest('.markdown')) return;
+        if (!(element instanceof Element) || isRecentAnalysisSuppressed(element) || element.closest('.markdown')) return;
         const turn = element.closest(TURN_SELECTOR);
         const existingMarker = element.closest('.csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live');
         // Historical rows are CSS-only. Restrict JS mutation work to the live
@@ -2170,8 +2263,17 @@
     }
 
     function scanRoot(scanRoot, latestTurnIndex = mountedLatestTurnIndex()) {
-      if (!(scanRoot instanceof Element)) return;
+      if (!(scanRoot instanceof Element) || isRecentAnalysisSuppressed(scanRoot)) return;
       state.stats.scans += 1;
+
+      if (state.settings.showRecentOnly && !isConversationTurnScoped(scanRoot)) {
+        const visibleTurns = getTurns()
+          .filter((turn) => scanRoot.contains(turn) && !isRecentAnalysisSuppressed(turn));
+        if (visibleTurns.length) {
+          visibleTurns.forEach((turn) => scheduleScan(turn));
+          return;
+        }
+      }
 
       // Summary-only mode does not need the general tool/thinking/pre scan. On
       // long chats that query can touch tens of thousands of nodes per batch.
@@ -2180,7 +2282,7 @@
         scanRoot,
         ...scanRoot.querySelectorAll('[data-testid], .csg-thinking, .csg-tool, .csg-heavy, pre, aside[class*="surface-error"]')
       ] : [];
-      const uniqueCandidates = [...new Set(candidates)];
+      const uniqueCandidates = [...new Set(candidates)].filter((el) => !isRecentAnalysisSuppressed(el));
       const plans = uniqueCandidates.map((el) => analyzeElement(el, latestTurnIndex));
       const oldAppErrorCandidates = state.settings.enabled && state.settings.hideOldAppLoadErrors
         ? appErrorCandidatesFor(scanRoot)
@@ -2260,14 +2362,14 @@
     function compactPendingRoots() {
       const compact = new Set();
       for (const node of state.pendingRoots) {
-        if (!(node instanceof Element) || !node.isConnected) continue;
+        if (!(node instanceof Element) || !node.isConnected || isRecentAnalysisSuppressed(node)) continue;
         const turn = node.closest('[data-testid^="conversation-turn-"]');
         const parent = node.parentElement;
         const anchor = turn || (parent && parent !== document.body ? parent : node);
         compact.add(anchor);
       }
       if (compact.size > 160) {
-        const mountedTurns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
+        const mountedTurns = [...getTurns()];
         const extras = [...compact]
           .filter((node) => !node.matches?.('[data-testid^="conversation-turn-"]'));
         const errorExtras = extras.filter((node) =>
@@ -2294,6 +2396,7 @@
 
     function scheduleScan(el) {
       if (el instanceof Element) {
+        if (isRecentAnalysisSuppressed(el)) return;
         state.pendingRoots.add(el);
         if (state.pendingRoots.size > 600) compactPendingRoots();
       }
@@ -2380,9 +2483,6 @@
       'button[aria-label*="送信"]'
     ].join(',');
 
-    function getTurns() {
-      return [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
-    }
 
     function getTurnRole(turn) {
       if (!(turn instanceof Element)) return '';
@@ -2669,13 +2769,17 @@
       }
       updateStatus();
       if (!state.settings.enabled) return;
-      if (state.settings.hideToolEmbeds) scanPreviewSurfaces(document.body);
+      const analysisTurns = state.settings.showRecentOnly
+        ? getTurns().filter((turn) => !isRecentAnalysisSuppressed(turn))
+        : getTurns();
+      if (state.settings.hideToolEmbeds) {
+        if (state.settings.showRecentOnly) analysisTurns.forEach(scanPreviewSurfaces);
+        else scanPreviewSurfaces(document.body);
+      }
       if (state.settings.hideToolSummary) {
-        // Prehide can make current MCP rows 0px before JS owns them. Sweep only
-        // their parent shells in small idle batches so every mounted historical
-        // turn loses redundant flex gaps without promoting all rows to JS markers.
-        document.querySelectorAll(TURN_SELECTOR).forEach((turn) =>
-          scheduleHistoricalToolSummaryShellSweep(turn));
+        // Recent-N owns the visual fate of old turns, so avoid spending Tool/App
+        // analysis work inside turns that are already provisionally/finally folded.
+        analysisTurns.forEach((turn) => scheduleHistoricalToolSummaryShellSweep(turn));
       }
       if (needsGeneralMutationScan()) {
         // Seed the live boundary synchronously before the document observer is
@@ -2683,14 +2787,14 @@
         // streaming summary could mutate before the first idle scan establishes
         // which turns are protected.
         if (state.settings.hideToolSummary) {
-          const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+          const turns = [...getTurns()];
           state.liveProtectedTurns = computeLiveProtectedTurns(mountedLatestTurnIndex(), turns);
         }
         scheduleScan(document.body);
       } else if (state.settings.hideToolSummary) {
         // Real historical MCP rows are CSS-only. JS scans only the protected
         // live edge; legacy disclosures are revisited when they cross that edge.
-        const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+        const turns = [...getTurns()];
         const latestTurnIndex = mountedLatestTurnIndex();
         state.liveProtectedTurns = computeLiveProtectedTurns(latestTurnIndex, turns);
         for (const turn of state.liveProtectedTurns) queueToolSummaryRoot(turn);
@@ -2806,7 +2910,7 @@
         stopSummaryLiveObservation();
         return;
       }
-      const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+      const turns = [...getTurns()];
       const latestTurnIndex = mountedLatestTurnIndex();
       const nextProtected = computeLiveProtectedTurns(latestTurnIndex, turns);
       const changed = new Set();
@@ -2854,7 +2958,7 @@
     }
 
     function bindSummaryBoundaryObserver() {
-      const turns = [...document.querySelectorAll(TURN_SELECTOR)];
+      const turns = [...getTurns()];
       const roots = new Set();
       for (const turn of turns) {
         if (!turn.isConnected) continue;
@@ -2901,7 +3005,7 @@
     }
 
     function bindSummaryGenerationObserver() {
-      if (!state.settings.enabled || !state.settings.hideToolSummary || needsGeneralMutationScan()) {
+      if (!state.settings.enabled) {
         state.summaryGenerationObserver?.disconnect();
         state.summaryGenerationRoot = null;
         state.summaryGenerationActive = false;
@@ -2917,7 +3021,11 @@
           const nextActive = isGenerationActive();
           const changed = nextActive !== state.summaryGenerationActive;
           state.summaryGenerationActive = nextActive;
-          if (changed) refreshSummaryLiveObservation();
+          if (changed) {
+            if (state.settings.hideToolSummary && !needsGeneralMutationScan()) refreshSummaryLiveObservation();
+            if (needsGeneralMutationScan()) scheduleScan();
+            if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
+          }
           if (!state.summaryGenerationRoot?.isConnected) bindSummaryGenerationObserver();
         });
       }
@@ -2975,21 +3083,26 @@
 
       const noteTurnNode = (node) => {
         if (!(node instanceof Element)) return;
-        if (node.matches(TURN_SELECTOR)) {
+        const directTurn = node.matches(TURN_SELECTOR);
+        const nestedTurns = directTurn ? [] : [...(node.querySelectorAll?.(TURN_SELECTOR) || [])];
+        if (directTurn) registerMountedTurn(node);
+        else nestedTurns.forEach(registerMountedTurn);
+        if (directTurn) {
           conversationTurnChanged = true;
           scheduleScan(node);
           return;
         }
-        const nestedTurns = node.querySelectorAll?.(TURN_SELECTOR);
-        if (nestedTurns?.length) {
+        if (nestedTurns.length) {
           conversationTurnChanged = true;
           nestedTurns.forEach((turn) => scheduleScan(turn));
         }
       };
 
       for (const mutation of mutations) {
+        const mutationElement = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+        if (mutationElement instanceof Element && isRecentAnalysisSuppressed(mutationElement)) continue;
         if (mutation.type === 'attributes') {
-          const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+          const target = mutationElement;
           if (!(target instanceof Element)) continue;
           if (containsStopGeneratingControl(target) ||
               wasStopGeneratingAttribute(mutation.attributeName, mutation.oldValue)) {
@@ -2998,6 +3111,8 @@
           scheduleSummaryMutationRoot(target);
           if (mutation.attributeName === 'data-testid' &&
               (target.matches(TURN_SELECTOR) || String(mutation.oldValue || '').startsWith('conversation-turn-'))) {
+            if (target.matches(TURN_SELECTOR)) registerMountedTurn(target);
+            else unregisterMountedTurn(target);
             conversationTurnChanged = true;
           }
           const classified = target.closest?.(classifiedSelector);
@@ -3036,9 +3151,7 @@
           if (!(node instanceof Element)) continue;
           if (containsStopGeneratingControl(node)) generationStateChanged = true;
           removed = true;
-          if (node.matches(TURN_SELECTOR) || Boolean(node.querySelector(TURN_SELECTOR))) {
-            conversationTurnChanged = true;
-          }
+          if (unregisterTurnsInNode(node)) conversationTurnChanged = true;
         }
 
         if (!generalMutationScan) continue;
@@ -3066,9 +3179,35 @@
       }
 
       if (removed) scheduleDetachedCleanup();
+      if (conversationTurnChanged) bindMainObserverRoot();
       if (conversationTurnChanged || generationStateChanged) scheduleScan();
       if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
     });
+
+    document.addEventListener('csg:recent-turn-visibility', (event) => {
+      const turn = event.target instanceof Element
+        ? (event.target.matches(TURN_SELECTOR) ? event.target : event.target.closest(TURN_SELECTOR))
+        : null;
+      if (!(turn instanceof Element) || !state.settings.enabled || !state.settings.showRecentOnly) return;
+      if (isRecentAnalysisSuppressed(turn)) {
+        for (const rootNode of [...state.pendingRoots]) {
+          if (rootNode === turn || turn.contains(rootNode)) state.pendingRoots.delete(rootNode);
+        }
+        for (const rootNode of [...state.summaryMutationRoots]) {
+          if (rootNode === turn || turn.contains(rootNode)) state.summaryMutationRoots.delete(rootNode);
+        }
+        for (const [iframe] of [...state.previewSurfaces]) {
+          if (turn.contains(iframe)) clearPreviewSurface(iframe);
+        }
+        for (const aside of [...state.oldAppErrorObservers.keys()]) {
+          if (turn.contains(aside)) stopOldAppErrorObserver(aside);
+        }
+        return;
+      }
+      if (state.settings.hideToolEmbeds) scanPreviewSurfaces(turn);
+      if (state.settings.hideToolSummary) scheduleHistoricalToolSummaryShellSweep(turn);
+      scheduleScan(turn);
+    }, true);
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === 'CSG_GET_STATS') {
@@ -3083,6 +3222,7 @@
 
     chrome.storage.local.get({ settings: DEFAULTS }, ({ settings }) => {
       state.settings = normalizeSettings(settings);
+      seedMountedTurns();
       if (state.settings.enabled && state.settings.hideOldAppLoadErrors) {
         // Seed route identity synchronously at document_idle. Without this,
         // a very fast SPA navigation can happen before the first idle scan and
@@ -3093,23 +3233,37 @@
       applySettings();
       if (!state.settings.enabled) return;
       if (needsGeneralMutationScan()) {
-        observer.observe(document.documentElement, {
-          childList: true,
-          subtree: true,
-          characterData: true,
-          attributes: true,
-          attributeOldValue: true,
-          attributeFilter: [
-            'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
-            'aria-modal', 'aria-label', 'aria-expanded', 'title'
-          ]
-        });
+        bindMainObserverRoot();
+        bindSummaryGenerationObserver();
       } else if (state.settings.hideToolSummary) {
         // Summary-only mode never observes the whole document. Historical real
         // MCP rows are CSS-only; generic fallback observation is confined to the
         // two protected live turns.
         startSummaryLiveObservation();
       }
+      setInterval(() => {
+        if (!state.settings.enabled) return;
+        const routeKey = location.pathname + location.search;
+        const routeChanged = routeKey !== state.observerRouteKey;
+        const generalAnalysis = needsGeneralMutationScan();
+        const mainObserverLost = generalAnalysis && !state.mainObserverRoot?.isConnected;
+        const registryLost = generalAnalysis && !getTurns().length;
+        if (routeChanged || mainObserverLost || registryLost) {
+          state.observerRouteKey = routeKey;
+          seedMountedTurns();
+          if (state.settings.hideOldAppLoadErrors) ensureOldAppErrorRoute();
+          if (generalAnalysis) {
+            bindMainObserverRoot();
+            scheduleScan(document.body);
+          } else if (state.settings.hideToolSummary) {
+            startSummaryLiveObservation();
+            for (const turn of state.liveProtectedTurns) queueToolSummaryRoot(turn);
+            scheduleScan();
+          }
+        }
+        bindSummaryGenerationObserver();
+      }, 750);
+
       // From this point content.js is the sole runtime summary classifier.
       // prehide.js only supplies first-paint structural CSS state and the
       // recent-conversation loading indicator; it owns no MutationObserver.

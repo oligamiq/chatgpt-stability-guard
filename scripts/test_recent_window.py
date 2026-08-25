@@ -699,6 +699,47 @@ const recycleTurn=setInterval(()=>{
         expected_global_ui=False,
     )
 
+
+    registry_before = r'''
+window.__csgTurnQueryCount=0;
+const __csgNativeQsa=document.querySelectorAll.bind(document);
+document.querySelectorAll=function(selector){
+  if(selector==='[data-testid^=\"conversation-turn-\"]') window.__csgTurnQueryCount+=1;
+  return __csgNativeQsa(selector);
+};
+'''
+    registry_after = r'''
+const registryCheck=setInterval(()=>{
+  if(document.documentElement.dataset.csgRecentState!=='ready') return;
+  clearInterval(registryCheck);
+  document.getElementById('thread').insertAdjacentHTML('beforeend',
+    '<section class=\"turn\" data-testid=\"conversation-turn-8\" data-turn=\"user\">u8</section>'+
+    '<section class=\"turn\" data-testid=\"conversation-turn-9\" data-turn=\"assistant\"><div class=\"markdown\">a9</div></section>');
+  setTimeout(()=>{
+    const thread=document.getElementById('thread');
+    const state=window.__csgRecentTestState;
+    if(window.__csgTurnQueryCount===1) thread.dataset.registryNoRescan='1';
+    if(state?.observerRoot===thread) thread.dataset.observerNarrow='1';
+  },700);
+},100);
+'''
+    run_case(
+        'incremental-registry-and-narrow-observer',
+        '/c/incremental-registry/',
+        accordion_body,
+        [
+            {'name':'no-whole-document-turn-rescan','selector':'#thread[data-registry-no-rescan=\"1\"]','hidden':False},
+            {'name':'observer-bound-to-thread','selector':'#thread[data-observer-narrow=\"1\"]','hidden':False},
+            {'name':'dynamic-user-visible','selector':'[data-testid=\"conversation-turn-8\"]','hidden':False},
+        ],
+        n=2,
+        before_js=registry_before,
+        after_js=registry_after,
+        delay=5200,
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
+    )
+
     print('RECENT WINDOW TESTS OK')
 
 

@@ -83,21 +83,64 @@
     function installRecentFastPrehide(total) {
       if (!isConversationRoute()) return;
       root.classList.add('csg-prehide-recent-fast');
+      const tracked = new Set();
+      const roles = new WeakMap();
+      let ordered = [];
+      let orderDirty = false;
       let scheduled = false;
+
+      const track = (turn) => {
+        if (!(turn instanceof Element) || !turn.matches('[data-testid^="conversation-turn-"]')) return;
+        if (!tracked.has(turn)) {
+          tracked.add(turn);
+          orderDirty = true;
+        }
+        roles.set(turn, fastTurnRole(turn));
+      };
+      const untrack = (turn) => {
+        if (!(turn instanceof Element) || !tracked.delete(turn)) return;
+        turn.removeAttribute('data-csg-prehide-old-turn');
+        orderDirty = true;
+      };
+      const trackNode = (node) => {
+        if (!(node instanceof Element)) return;
+        if (node.matches('[data-testid^="conversation-turn-"]')) track(node);
+        node.querySelectorAll?.('[data-testid^="conversation-turn-"]').forEach(track);
+      };
+      const untrackNode = (node) => {
+        if (!(node instanceof Element)) return;
+        if (tracked.has(node)) untrack(node);
+        node.querySelectorAll?.('[data-testid^="conversation-turn-"]').forEach(untrack);
+      };
+      const turnsInOrder = () => {
+        if (!orderDirty) return ordered;
+        ordered = [...tracked].filter((turn) => turn.isConnected && turn.matches('[data-testid^="conversation-turn-"]'));
+        ordered.sort((a, b) => {
+          if (a === b) return 0;
+          return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+        });
+        tracked.clear();
+        ordered.forEach((turn) => tracked.add(turn));
+        orderDirty = false;
+        return ordered;
+      };
       const fold = () => {
         scheduled = false;
         if (root.dataset.csgRecentRuntime === '1') {
           observer.disconnect();
           return;
         }
-        const turns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
+        const turns = turnsInOrder();
         const starts = [];
         turns.forEach((turn, index) => {
-          if (fastTurnRole(turn) === 'user') starts.push(index);
+          if (roles.get(turn) === 'user') starts.push(index);
         });
         const boundaryIndex = starts.length > total ? starts[starts.length - total] : -1;
         turns.forEach((turn, index) => {
-          turn.toggleAttribute('data-csg-prehide-old-turn', boundaryIndex > 0 && index < boundaryIndex);
+          const old = boundaryIndex > 0 && index < boundaryIndex;
+          if (turn.hasAttribute('data-csg-prehide-old-turn') !== old) {
+            turn.toggleAttribute('data-csg-prehide-old-turn', old);
+          }
         });
       };
       const schedule = () => {
@@ -106,25 +149,43 @@
         setTimeout(fold, 0);
       };
       const observer = new MutationObserver((mutations) => {
+        let changed = false;
         for (const mutation of mutations) {
           if (mutation.type === 'attributes') {
-            schedule();
-            return;
-          }
-          for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
-            if (!(node instanceof Element)) continue;
-            if (node.matches('[data-testid^="conversation-turn-"]') ||
-                node.querySelector?.('[data-testid^="conversation-turn-"]')) {
-              schedule();
-              return;
+            const target = mutation.target instanceof Element ? mutation.target : null;
+            if (!target) continue;
+            const wasTurn = mutation.attributeName === 'data-testid' && String(mutation.oldValue || '').startsWith('conversation-turn-');
+            if (wasTurn && !target.matches('[data-testid^="conversation-turn-"]')) {
+              untrack(target);
+              changed = true;
+            } else {
+              const turn = target.matches('[data-testid^="conversation-turn-"]') ? target : target.closest('[data-testid^="conversation-turn-"]');
+              if (turn) {
+                track(turn);
+                changed = true;
+              }
             }
+            if (mutation.attributeName === 'data-csg-recent-runtime') changed = true;
+            continue;
+          }
+          for (const node of mutation.removedNodes) {
+            if (!(node instanceof Element)) continue;
+            untrackNode(node);
+            changed = true;
+          }
+          for (const node of mutation.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            trackNode(node);
+            changed = true;
           }
         }
+        if (changed) schedule();
       });
       observer.observe(root, {
         childList: true,
         subtree: true,
         attributes: true,
+        attributeOldValue: true,
         attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-csg-recent-runtime']
       });
       schedule();

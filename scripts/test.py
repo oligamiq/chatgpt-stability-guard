@@ -23,6 +23,7 @@ def main():
     run(sys.executable, 'scripts/test_old_app_errors.py')
     run(sys.executable, 'scripts/test_recent_window.py')
     run(sys.executable, 'scripts/test_loading_indicator.py')
+    run(sys.executable, 'scripts/test_recent_analysis_skip.py')
     run(sys.executable, 'scripts/test_auto_continue.py')
     run(sys.executable, 'scripts/test_ui_isolation.py')
     run(sys.executable, 'scripts/test_generation_completion.py')

@@ -50,12 +50,17 @@
     recoveryEpoch: -1,
     route: location.pathname,
     observer: null,
+    observerRoot: null,
+    mountedTurns: new Set(),
+    mountedTurnsOrder: [],
+    mountedTurnsDirty: true,
     exchangeOverrides: new Map(),
     lastMergeScrollTop: null,
     lastWindowKeys: [],
     bottomTailEvidence: null,
     loadingRemoveTimer: 0,
     loadingWatchdogTimer: 0,
+    loadingUiFinished: false,
     initialFinalized: false,
     finalizeTimer: 0,
     finalScrollCorrections: 0,
@@ -144,7 +149,7 @@
   }
 
   function ensureLoadingIndicator() {
-    if (!state.active || !isConversationRoute()) return null;
+    if (!state.active || state.loadingUiFinished || !isConversationRoute()) return null;
     clearTimeout(state.loadingRemoveTimer);
     state.loadingRemoveTimer = 0;
     let loading = document.getElementById('csg-recent-loading');
@@ -196,6 +201,14 @@
     });
   }
 
+  function finishLoadingUi() {
+    if (state.loadingUiFinished) return;
+    updateLoadingIndicator('ready');
+    state.loadingUiFinished = true;
+    clearLoadingWatchdog();
+    removeLoadingIndicator(true);
+  }
+
   function removeLoadingIndicator(complete = false) {
     clearTimeout(state.loadingRemoveTimer);
     state.loadingRemoveTimer = 0;
@@ -240,8 +253,77 @@
     }, LOADING_WATCHDOG_MS);
   }
 
+  function registerMountedTurn(turn) {
+    if (!(turn instanceof Element) || !turn.matches(TURN_SELECTOR)) return false;
+    if (state.mountedTurns.has(turn)) return false;
+    state.mountedTurns.add(turn);
+    state.mountedTurnsDirty = true;
+    return true;
+  }
+
+  function unregisterMountedTurn(turn) {
+    if (!(turn instanceof Element) || !state.mountedTurns.delete(turn)) return false;
+    state.mountedTurnsDirty = true;
+    return true;
+  }
+
+  function registerTurnsInNode(node) {
+    if (!(node instanceof Element)) return false;
+    let changed = registerMountedTurn(node);
+    node.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => { changed = registerMountedTurn(turn) || changed; });
+    return changed;
+  }
+
+  function unregisterTurnsInNode(node) {
+    if (!(node instanceof Element)) return false;
+    let changed = unregisterMountedTurn(node);
+    node.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => { changed = unregisterMountedTurn(turn) || changed; });
+    return changed;
+  }
+
+  function seedMountedTurns() {
+    state.mountedTurns.clear();
+    document.querySelectorAll(TURN_SELECTOR).forEach((turn) => state.mountedTurns.add(turn));
+    state.mountedTurnsDirty = true;
+  }
+
   function getTurns() {
-    return [...document.querySelectorAll(TURN_SELECTOR)];
+    if (!state.mountedTurnsDirty) return state.mountedTurnsOrder;
+    const ordered = [...state.mountedTurns].filter((turn) => turn.isConnected && turn.matches(TURN_SELECTOR));
+    ordered.sort((a, b) => {
+      if (a === b) return 0;
+      return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+    state.mountedTurns = new Set(ordered);
+    state.mountedTurnsOrder = ordered;
+    state.mountedTurnsDirty = false;
+    return ordered;
+  }
+
+  function conversationObserverRoot() {
+    const turns = getTurns();
+    if (!turns.length) return document.documentElement;
+    let root = turns[0].parentElement || document.documentElement;
+    const last = turns[turns.length - 1];
+    while (root !== document.documentElement && !root.contains(last)) {
+      root = root.parentElement || document.documentElement;
+    }
+    return root;
+  }
+
+  function bindObserverRoot() {
+    if (!state.observer) return;
+    const next = conversationObserverRoot();
+    if (state.observerRoot === next && next?.isConnected) return;
+    state.observer.disconnect();
+    state.observerRoot = next;
+    state.observer.observe(next, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-message-id', 'data-turn-id'],
+      attributeOldValue: true
+    });
   }
 
   function turnRole(turn) {
@@ -815,8 +897,30 @@
   }
 
   function clearProvisionalFold() {
-    document.querySelectorAll('[data-csg-prehide-old-turn]').forEach((turn) => turn.removeAttribute('data-csg-prehide-old-turn'));
+    const released = [];
+    document.querySelectorAll('[data-csg-prehide-old-turn]').forEach((turn) => {
+      turn.removeAttribute('data-csg-prehide-old-turn');
+      if (!turn.hasAttribute('data-csg-recent-old')) released.push(turn);
+    });
     ROOT.classList.remove('csg-prehide-recent-fast');
+    released.forEach((turn) => notifyTurnAnalysisVisibility(turn, false));
+  }
+
+  function notifyTurnAnalysisVisibility(turn, suppressed) {
+    if (!(turn instanceof Element)) return;
+    turn.dispatchEvent(new CustomEvent('csg:recent-turn-visibility', {
+      bubbles: true,
+      detail: { suppressed: Boolean(suppressed) }
+    }));
+  }
+
+  function setTurnAnalysisSuppressed(turn, suppressed) {
+    if (!(turn instanceof Element)) return;
+    const next = Boolean(suppressed);
+    const previous = turn.hasAttribute('data-csg-recent-old');
+    if (previous === next) return;
+    turn.toggleAttribute('data-csg-recent-old', next);
+    notifyTurnAnalysisVisibility(turn, next);
   }
 
   function markTurnElement(turn) {
@@ -824,6 +928,7 @@
     const key = turnKey(turn);
     const startKey = exchangeStartForKey(key);
     if (!startKey || state.ambiguousLateNumeric.has(key)) {
+      setTurnAnalysisSuppressed(turn, false);
       turn.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
       turn.querySelector(':scope > .csg-chat-toggle')?.remove();
       return false;
@@ -831,10 +936,12 @@
     const expanded = exchangeExpanded(startKey);
     if (key === startKey) {
       ensureExchangeToggle(turn, startKey);
+      setTurnAnalysisSuppressed(turn, !expanded);
       turn.classList.remove('csg-hidden-old-turn');
       turn.classList.toggle('csg-chat-collapsed', !expanded);
-      return false;
+      return !expanded;
     }
+    setTurnAnalysisSuppressed(turn, !expanded);
     turn.classList.remove('csg-chat-collapsed');
     turn.querySelector(':scope > .csg-chat-toggle')?.remove();
     turn.classList.toggle('csg-hidden-old-turn', !expanded);
@@ -1038,6 +1145,12 @@
         if (!isCurrentEpoch(epoch)) return;
       }
 
+      // The visible loading UI tracks processing of the DOM ChatGPT has mounted,
+      // not proof that the N-exchange boundary exists in that virtualized window.
+      // Older boundary evidence may arrive only after later native/user scrolling.
+      // Finish the gauge now and keep boundary discovery running invisibly.
+      finishLoadingUi();
+
       const starts = exchangeStartKeys();
       if (!starts.length) {
         publishState('preparing');
@@ -1075,9 +1188,9 @@
 
       state.ready = true;
       state.initialFinalized = true;
-      clearProvisionalFold();
       ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
       markMountedTurns();
+      clearProvisionalFold();
       updateAccordion();
       updateMinimum();
       if (!isCurrentEpoch(epoch) || !state.ready || state.suspended) return;
@@ -1278,8 +1391,11 @@
           if (wasTurnTestId || target?.matches(TURN_SELECTOR) || target?.closest(TURN_SELECTOR)) {
             structureChanged = true;
             if (wasTurnTestId && target && !target.matches(TURN_SELECTOR)) {
+              unregisterMountedTurn(target);
               target.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
               target.querySelector(':scope > .csg-chat-toggle')?.remove();
+            } else if (target?.matches(TURN_SELECTOR)) {
+              registerMountedTurn(target);
             }
           }
           continue;
@@ -1299,20 +1415,20 @@
             structureChanged = true;
           }
         }
-        for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        for (const node of mutation.removedNodes) {
           if (!(node instanceof Element)) continue;
-          if (node.matches(TURN_SELECTOR)) {
-            if (state.ready) markTurnElement(node);
-            structureChanged = true;
-          } else if (!targetTurn && node.querySelector?.(TURN_SELECTOR)) {
-            // React may insert a wrapper containing one or more turns. Ignore
-            // unrelated page/UI mutations, but trigger one coalesced structure
-            // refresh when the inserted wrapper actually contains a turn.
-            structureChanged = true;
-          }
+          if (unregisterTurnsInNode(node)) structureChanged = true;
+        }
+        for (const node of mutation.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          const addedTurn = node.matches(TURN_SELECTOR);
+          const addedAny = registerTurnsInNode(node);
+          if (addedTurn && state.ready) markTurnElement(node);
+          if (addedAny) structureChanged = true;
         }
       }
       if (structureChanged) {
+        bindObserverRoot();
         if (!state.initialFinalized) applyProvisionalFold();
         scheduleStructureRefresh();
         if (state.ready && state.finalScrollCorrections === 0) scheduleFinalScrollCorrection();
@@ -1322,13 +1438,7 @@
         if (state.ready && state.finalScrollCorrections === 0) scheduleFinalScrollCorrection();
       }
     });
-    state.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-message-id', 'data-turn-id'],
-      attributeOldValue: true
-    });
+    bindObserverRoot();
   }
 
   function attachScrollHost() {
@@ -1372,9 +1482,11 @@
   }
 
   function clearMountedMarks() {
-    document.querySelectorAll('.csg-hidden-old-turn').forEach((turn) => turn.classList.remove('csg-hidden-old-turn'));
-    document.querySelectorAll('.csg-chat-collapsed').forEach((turn) => turn.classList.remove('csg-chat-collapsed'));
-    document.querySelectorAll('.csg-chat-toggle').forEach((button) => button.remove());
+    for (const turn of getTurns()) {
+      setTurnAnalysisSuppressed(turn, false);
+      turn.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
+      turn.querySelector(':scope > .csg-chat-toggle')?.remove();
+    }
     clearProvisionalFold();
   }
 
@@ -1400,9 +1512,12 @@
     clearMountedMarks();
     detachScrollHost();
     state.ready = false;
+    state.loadingUiFinished = false;
     state.initialFinalized = false;
     state.finalScrollCorrections = 0;
     delete ROOT.dataset.csgRecentFinalScrollCorrections;
+    seedMountedTurns();
+    bindObserverRoot();
     state.sequence = [];
     state.roles.clear();
     state.assistantContent.clear();
@@ -1441,6 +1556,7 @@
   }
 
   function start() {
+    seedMountedTurns();
     ROOT.dataset.csgRecentRuntime = '1';
     ROOT.classList.add('csg-prehide-recent-fast');
     applyProvisionalFold();
@@ -1453,8 +1569,13 @@
     setInterval(() => {
       if (!state.active) return;
       if (location.pathname !== state.route) scheduleStructureRefresh();
-      else if (state.ready) {
-        updateMinimum();
+      else {
+        if (!state.observerRoot?.isConnected) {
+          seedMountedTurns();
+          bindObserverRoot();
+          scheduleStructureRefresh();
+        }
+        if (state.ready) updateMinimum();
       }
     }, 750);
     discoverBoundary();

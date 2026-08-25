@@ -232,6 +232,34 @@ def test_share_provisional_boundary_is_not_overclaimed():
     print('PASS share-provisional-boundary-not-overclaimed')
 
 
+def test_virtualized_streaming_tail_does_not_hold_loader_open():
+    turns = ''.join([
+        '<section data-testid="conversation-turn-80" data-turn="user">u80</section>',
+        '<section data-testid="conversation-turn-81" data-turn="assistant"><div class="markdown">a81</div></section>',
+        '<section data-testid="conversation-turn-82" data-turn="user">u82</section>',
+        '<section id="streaming" data-testid="conversation-turn-83" data-turn="assistant"><div class="markdown">a83</div></section>',
+    ])
+    page = f'''<!doctype html><html><head><style>.group\\/scroll-root{{height:320px;overflow-y:auto}}section{{min-height:80px}}</style>
+{chrome_stub(3)}<script>{PREHIDE_JS}</script></head><body><div class="group/scroll-root">{turns}</div>
+<button data-testid="stop-button">Stop</button><script>{RECENT_JS_FAST_WATCHDOG}</script><script>
+let ticks=0;const stream=setInterval(()=>{{const el=document.querySelector('#streaming .markdown');if(el)el.append(document.createTextNode(' x'));if(++ticks>=20)clearInterval(stream);}},40);
+setTimeout(()=>{{const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{
+ state:document.documentElement.dataset.csgRecentState||'',
+ loaderExists:!!document.getElementById('csg-recent-loading'),
+ loadingUiFinished:window.__csgRecentTestState?.loadingUiFinished||false,
+ ready:window.__csgRecentTestState?.ready||false,
+ suspended:window.__csgRecentTestState?.suspended||false,
+ initialFinalized:window.__csgRecentTestState?.initialFinalized||false
+}});document.body.appendChild(out);}},1250);</script></body></html>'''
+    result = serve_page('/c/virtualized-streaming/', page, 1550)
+    assert result['state'] == 'preparing', result
+    assert result['loaderExists'] is False, result
+    assert result['loadingUiFinished'] is True, result
+    assert result['suspended'] is False, result
+    assert result['ready'] is False and result['initialFinalized'] is False, result
+    print('PASS virtualized-streaming-tail-does-not-hold-loader-open')
+
+
 def test_recent_loader_watchdog_fails_open():
     page = f'''<!doctype html><html><head>{chrome_stub(3)}<script>{PREHIDE_JS}</script></head><body>
 <div class="group/scroll-root"></div>
@@ -253,6 +281,7 @@ def main():
     test_recent_loader_handoff()
     test_short_history_uses_real_target()
     test_share_provisional_boundary_is_not_overclaimed()
+    test_virtualized_streaming_tail_does_not_hold_loader_open()
     test_recent_loader_watchdog_fails_open()
     print('LOADING INDICATOR TESTS OK')
 
