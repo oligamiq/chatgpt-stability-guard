@@ -81,6 +81,9 @@ def test_prehide_early_loader():
 </body></html>'''
     root_result = serve_page('/', root_page, 350)
     assert root_result == {'exists': False}, root_result
+
+    group_result = serve_page('/g/example/c/early/', page, 350)
+    assert group_result == {'exists': True, 'stage': 'detecting', 'total': '3', 'confirmed': '0'}, group_result
     print('PASS prehide-early-recent-loader')
 
 
@@ -121,9 +124,48 @@ sampleLoading();
     assert result['maxConfirmed'] >= 3, result
     assert result['maxNodes'] == 1, result
     assert 'detecting' in result['stages'], result
-    assert 'finalizing' in result['stages'], result
+    assert 'latest' in result['stages'], result
     assert 'ready' in result['stages'], result
     print('PASS recent-loader-progress-and-removal')
+
+
+def test_short_history_uses_real_target():
+    turns = ''.join([
+        '<section data-testid="conversation-turn-0" data-turn="user">u0</section>',
+        '<section data-testid="conversation-turn-1" data-turn="assistant"><div class="markdown">a1</div></section>',
+        '<section data-testid="conversation-turn-2" data-turn="user">u2</section>',
+        '<section data-testid="conversation-turn-3" data-turn="assistant"><div class="markdown">a3</div></section>',
+    ])
+    page = f'''<!doctype html><html><head><style>.group\\/scroll-root{{height:320px;overflow-y:auto}}section{{min-height:80px}}</style>
+{chrome_stub(3)}<script>{PREHIDE_JS}</script></head><body><div class="group/scroll-root">{turns}</div>
+<script>{RECENT_JS}</script><script>setTimeout(()=>{{const el=document.getElementById('csg-recent-loading');const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{state:document.documentElement.dataset.csgRecentState||'',stage:el?.dataset.stage||'',confirmed:el?.dataset.confirmed||'',target:el?.dataset.target||'',startKnown:el?.dataset.historyStartKnown||'',detail:el?.querySelector('.csg-recent-loading-detail')?.textContent||''}});document.body.appendChild(out);}},420);</script></body></html>'''
+    result = serve_page('/c/short/', page, 700)
+    assert result['state'] == 'ready', result
+    assert result['stage'] == 'ready', result
+    assert result['confirmed'] == '2' and result['target'] == '2', result
+    assert result['startKnown'] == 'true', result
+    assert 'all history' in result['detail'], result
+    print('PASS short-history-loading-target-is-exact')
+
+
+def test_share_provisional_boundary_is_not_overclaimed():
+    turns = ''.join([
+        '<section data-testid="conversation-turn-40" data-turn="assistant"></section>',
+        '<section data-testid="conversation-turn-41" data-turn="user">Continue</section>',
+        '<section data-testid="conversation-turn-42" data-turn="assistant"><div class="markdown">continued</div></section>',
+        '<section data-testid="conversation-turn-43" data-turn="user">new request</section>',
+        '<section data-testid="conversation-turn-44" data-turn="assistant"><div class="markdown">latest</div></section>',
+    ])
+    page = f'''<!doctype html><html><head><style>.group\\/scroll-root{{height:320px;overflow-y:auto}}section{{min-height:80px}}</style>
+{chrome_stub(2)}<script>{PREHIDE_JS}</script></head><body><div class="group/scroll-root">{turns}</div>
+<script>{RECENT_JS}</script><script>setTimeout(()=>{{const el=document.getElementById('csg-recent-loading');const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{state:document.documentElement.dataset.csgRecentState||'',stage:el?.dataset.stage||'',confirmed:el?.dataset.confirmed||'',target:el?.dataset.target||'',startKnown:el?.dataset.historyStartKnown||'',detail:el?.querySelector('.csg-recent-loading-detail')?.textContent||''}});document.body.appendChild(out);}},420);</script></body></html>'''
+    result = serve_page('/share/provisional/', page, 700)
+    assert result['state'] == 'ready', result
+    assert result['stage'] == 'ready', result
+    assert result['confirmed'] == '1' and result['target'] == '2', result
+    assert result['startKnown'] == 'false', result
+    assert 'verification is continuing' in result['detail'], result
+    print('PASS share-provisional-boundary-not-overclaimed')
 
 
 def test_recent_loader_watchdog_fails_open():
@@ -143,6 +185,8 @@ def test_recent_loader_watchdog_fails_open():
 def main():
     test_prehide_early_loader()
     test_recent_loader_handoff()
+    test_short_history_uses_real_target()
+    test_share_provisional_boundary_is_not_overclaimed()
     test_recent_loader_watchdog_fails_open()
     print('LOADING INDICATOR TESTS OK')
 

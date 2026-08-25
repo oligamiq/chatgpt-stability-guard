@@ -22,25 +22,17 @@
     ambiguousLateNumeric: new Set(),
     messageIds: new Map(),
     identityEvidence: new Map(),
-    keyTops: new Map(),
     missingEvidence: new Map(),
     boundaryKey: '',
-    boundaryProvisional: false,
-    boundaryGraceTimer: 0,
     suspended: false,
-    resizeScrollHeightGuard: null,
     pendingBoundaryKey: '',
     hiddenExchangeCount: 0,
     hiddenTurnCount: 0,
     historyAvailable: false,
     scrollHost: null,
-    recentContentHeight: 0,
-    minScrollTop: 0,
     scheduled: 0,
     contentTimer: 0,
     roleConfirmTimer: 0,
-    coordinateTimer: 0,
-    coordinateGeneration: 0,
     epoch: 0,
     initializing: false,
     initializingEpoch: -1,
@@ -48,13 +40,7 @@
     recoveryEpoch: -1,
     route: location.pathname,
     observer: null,
-    scrollbar: null,
-    thumb: null,
-    drag: null,
-    accordion: null,
-    accordionLabel: null,
-    expanded: false,
-    accordionTransitioning: false,
+    exchangeOverrides: new Map(),
     lastMergeScrollTop: null,
     lastWindowKeys: [],
     bottomTailEvidence: null,
@@ -83,7 +69,7 @@
   }
 
   function isConversationRoute() {
-    return location.pathname.startsWith('/c/') || isShareRoute();
+    return /^\/(?:g\/[^/]+\/)?c\//.test(location.pathname) || isShareRoute();
   }
 
   function isJapaneseUi() {
@@ -91,27 +77,29 @@
     return preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
   }
 
-  function loadingCopy(stage, confirmed, total) {
+  function loadingCopy(stage, confirmed, target, historyStartKnown) {
     const japanese = isJapaneseUi();
+    const bounded = Math.min(confirmed, target);
+    const provisional = bounded < target;
     const count = japanese
-      ? `${Math.min(confirmed, total)} / ${total} 対話を確認済み`
-      : `${Math.min(confirmed, total)} / ${total} exchanges confirmed`;
+      ? `${bounded} / ${target} 対話を確認済み${historyStartKnown && target < state.n ? '（全履歴）' : ''}`
+      : `${bounded} / ${target} exchanges confirmed${historyStartKnown && target < state.n ? ' (all history)' : ''}`;
     const details = japanese
       ? {
-          detecting: '会話を検出しています…',
-          latest: '最新の会話を確認しています…',
-          history: '必要な過去の対話を確認しています…',
-          finalizing: '表示範囲を調整しています…',
-          ready: '準備が完了しました',
-          waiting: 'ChatGPT の会話データを待っています…'
+          detecting: '会話DOMを検出しています…',
+          latest: '最新の対話の役割を確認しています…',
+          history: '直近範囲の開始位置を確認しています…',
+          finalizing: '折りたたみ境界をDOMへ反映しています…',
+          ready: provisional ? '表示範囲を設定しました。境界は継続確認中です…' : '表示範囲を確認しました',
+          waiting: 'ChatGPT の会話DOMを待っています…'
         }
       : {
-          detecting: 'Detecting conversation…',
-          latest: 'Checking the latest conversation…',
-          history: 'Checking the required earlier exchanges…',
-          finalizing: 'Adjusting the visible range…',
-          ready: 'Ready',
-          waiting: 'Waiting for ChatGPT conversation data…'
+          detecting: 'Detecting conversation DOM…',
+          latest: 'Verifying roles in the latest exchanges…',
+          history: 'Verifying the start of the recent range…',
+          finalizing: 'Applying the fold boundary to the DOM…',
+          ready: provisional ? 'Visible range applied; boundary verification is continuing…' : 'Visible range verified',
+          waiting: 'Waiting for ChatGPT conversation DOM…'
         };
     return {
       title: japanese ? '直近の会話を準備中' : 'Preparing recent conversation',
@@ -119,9 +107,25 @@
     };
   }
 
-  function discoveredExchangeCount() {
-    if (!state.sequence.length) return 0;
-    return isShareRoute() ? exchangeStartKeys().length : userKeys().length;
+  function historyStartKnown() {
+    for (const key of state.sequence) {
+      if (state.numeric.get(key) === 0 && state.roles.has(key)) return true;
+    }
+    return false;
+  }
+
+  function loadingEvidence() {
+    const startKnown = historyStartKnown();
+    if (isShareRoute()) {
+      const starts = shareExchangeStarts();
+      const target = startKnown && starts.length < state.n ? Math.max(1, starts.length) : state.n;
+      const recent = starts.slice(-target);
+      const confirmed = recent.filter((entry, index) => entry.confirmed || (startKnown && index === 0 && starts.length <= target)).length;
+      return { confirmed: Math.min(target, confirmed), target, startKnown };
+    }
+    const starts = userKeys();
+    const target = startKnown && starts.length < state.n ? Math.max(1, starts.length) : state.n;
+    return { confirmed: Math.min(target, starts.length), target, startKnown };
   }
 
   function ensureLoadingIndicator() {
@@ -151,15 +155,17 @@
   function updateLoadingIndicator(stage = 'detecting') {
     const loading = ensureLoadingIndicator();
     if (!loading) return;
-    const confirmed = Math.min(state.n, discoveredExchangeCount());
-    const copy = loadingCopy(stage, confirmed, state.n);
+    const evidence = loadingEvidence();
+    const copy = loadingCopy(stage, evidence.confirmed, evidence.target, evidence.startKnown);
     loading.dataset.stage = stage;
-    loading.dataset.confirmed = String(confirmed);
+    loading.dataset.confirmed = String(evidence.confirmed);
     loading.dataset.total = String(state.n);
+    loading.dataset.target = String(evidence.target);
+    loading.dataset.historyStartKnown = evidence.startKnown ? 'true' : 'false';
     loading.querySelector('.csg-recent-loading-title').textContent = copy.title;
     loading.querySelector('.csg-recent-loading-detail').textContent = copy.detail;
     const progress = loading.querySelector('.csg-recent-loading-progress');
-    const slots = Math.min(5, state.n);
+    const slots = Math.min(5, evidence.target);
     if (progress.childElementCount !== slots) {
       progress.replaceChildren(...Array.from({ length: slots }, () => {
         const step = document.createElement('span');
@@ -167,9 +173,9 @@
         return step;
       }));
     }
-    const visibleDone = state.n <= slots
-      ? confirmed
-      : Math.floor((confirmed / state.n) * slots);
+    const visibleDone = evidence.target <= slots
+      ? evidence.confirmed
+      : Math.floor((evidence.confirmed / evidence.target) * slots);
     [...progress.children].forEach((step, index) => {
       step.dataset.done = index < visibleDone ? 'true' : 'false';
     });
@@ -339,17 +345,15 @@
       state.ambiguousLateNumeric.delete(key);
       state.messageIds.delete(key);
       state.identityEvidence.delete(key);
-      state.keyTops.delete(key);
       state.missingEvidence.delete(key);
+      state.exchangeOverrides.delete(key);
     }
     if (boundaryRemoved) {
       state.ready = false;
       state.boundaryKey = '';
-      state.boundaryProvisional = false;
-      state.pendingBoundaryKey = '';
+        state.pendingBoundaryKey = '';
       delete ROOT.dataset.csgRecentMode;
       ROOT.classList.remove('csg-show-recent-only');
-      if (state.scrollbar) state.scrollbar.hidden = true;
       publishState('waiting');
     }
     return boundaryRemoved;
@@ -458,10 +462,6 @@
       refreshAssistantContentEvidence(item);
       if (Number.isInteger(item.index)) state.numeric.set(item.key, item.index);
       if (item.messageId && !state.messageIds.has(item.key)) state.messageIds.set(item.key, item.messageId);
-      if (state.scrollHost) {
-        const top = topInScrollContent(item.turn);
-        if (Number.isFinite(top)) state.keyTops.set(item.key, top);
-      }
     }
     const keys = items.map((item) => item.key);
     reconcileMountedWindow(items);
@@ -699,22 +699,19 @@
   }
 
   function computeBoundary() {
-    const starts = exchangeStartKeys();
-    if (!starts.length) return '';
-    const index = Math.max(0, starts.length - state.n);
-    state.hiddenExchangeCount = Math.max(0, starts.length - state.n);
-    return starts[index];
-  }
-
-  function boundaryDiscoveryComplete() {
-    if (!isShareRoute()) {
-      const starts = exchangeStartKeys();
-      return starts.length >= state.n && Boolean(computeBoundary());
+    if (isShareRoute()) {
+      const starts = shareExchangeStarts();
+      state.hiddenExchangeCount = Math.max(0, starts.length - state.n);
+      if (!starts.length) return '';
+      if (starts.length < state.n) return historyStartKnown() ? starts[0].key : '';
+      const boundary = starts[starts.length - state.n];
+      return boundary?.key || '';
     }
-    const starts = shareExchangeStarts();
-    if (starts.length < state.n) return false;
-    const boundary = starts[Math.max(0, starts.length - state.n)];
-    return Boolean(boundary?.key && boundary.confirmed);
+    const starts = userKeys();
+    state.hiddenExchangeCount = Math.max(0, starts.length - state.n);
+    if (!starts.length) return '';
+    if (starts.length < state.n) return historyStartKnown() ? starts[0] : '';
+    return starts[starts.length - state.n];
   }
 
   function keyPosition(key) {
@@ -733,167 +730,104 @@
     return false;
   }
 
+  function exchangeStartForKey(key) {
+    const position = keyPosition(key);
+    if (position < 0) return '';
+    const boundaryPosition = keyPosition(state.boundaryKey);
+    let start = boundaryPosition >= 0 && position >= boundaryPosition ? state.boundaryKey : '';
+    for (const candidate of exchangeStartKeys()) {
+      const candidatePosition = keyPosition(candidate);
+      if (candidatePosition < 0 || candidatePosition > position) continue;
+      if (boundaryPosition >= 0 && position >= boundaryPosition && candidatePosition < boundaryPosition) continue;
+      start = candidate;
+    }
+    if (!start && isOldKey(key)) return key;
+    return start;
+  }
+
+  function exchangeExpanded(startKey) {
+    if (!startKey) return true;
+    if (state.exchangeOverrides.has(startKey)) return state.exchangeOverrides.get(startKey) === true;
+    return !isOldKey(startKey);
+  }
+
+  function updateExchangeToggle(button, startKey) {
+    if (!(button instanceof HTMLButtonElement)) return;
+    const expanded = exchangeExpanded(startKey);
+    const glyph = expanded ? '^' : '>';
+    const expandedText = String(expanded);
+    const label = expanded ? 'Collapse this chat' : 'Expand this chat';
+    if (button.textContent !== glyph) button.textContent = glyph;
+    if (button.dataset.expanded !== expandedText) button.dataset.expanded = expandedText;
+    if (button.getAttribute('aria-expanded') !== expandedText) button.setAttribute('aria-expanded', expandedText);
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+  }
+
+  function ensureExchangeToggle(turn, startKey) {
+    if (!(turn instanceof Element) || !startKey) return null;
+    let button = turn.querySelector(':scope > .csg-chat-toggle');
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'csg-chat-toggle';
+      button.dataset.exchangeKey = startKey;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const key = button.dataset.exchangeKey || '';
+        state.exchangeOverrides.set(key, !exchangeExpanded(key));
+        markMountedTurns();
+      });
+      turn.prepend(button);
+    }
+    button.dataset.exchangeKey = startKey;
+    updateExchangeToggle(button, startKey);
+    return button;
+  }
+
   function markTurnElement(turn) {
     if (!(turn instanceof Element)) return false;
     const key = turnKey(turn);
-    const boundaryPosition = keyPosition(state.boundaryKey);
-    const position = keyPosition(key);
-    const boundaryNumeric = state.numeric.get(state.boundaryKey);
-    const numeric = state.numeric.get(key);
-    const semanticKnown = boundaryPosition >= 0 && position >= 0;
-    const numericKnown = Number.isInteger(boundaryNumeric) && Number.isInteger(numeric);
-    // Semantic ordering is authoritative. An unknown mounted/reused turn is
-    // not proven old, so keep it visible until refreshStructure() classifies it.
-    let old = false;
-    if (!state.expanded && !state.ambiguousLateNumeric.has(key)) {
-      if (semanticKnown) old = position < boundaryPosition;
-      else if (numericKnown) old = numeric < boundaryNumeric;
+    const startKey = exchangeStartForKey(key);
+    if (!startKey || state.ambiguousLateNumeric.has(key)) {
+      turn.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
+      turn.querySelector(':scope > .csg-chat-toggle')?.remove();
+      return false;
     }
-    turn.classList.toggle('csg-hidden-old-turn', old);
-    return old;
+    const expanded = exchangeExpanded(startKey);
+    if (key === startKey) {
+      ensureExchangeToggle(turn, startKey);
+      turn.classList.remove('csg-hidden-old-turn');
+      turn.classList.toggle('csg-chat-collapsed', !expanded);
+      return false;
+    }
+    turn.classList.remove('csg-chat-collapsed');
+    turn.querySelector(':scope > .csg-chat-toggle')?.remove();
+    turn.classList.toggle('csg-hidden-old-turn', !expanded);
+    return !expanded;
   }
 
   function markMountedTurns() {
     let hidden = 0;
-    for (const item of currentWindow()) {
-      if (markTurnElement(item.turn)) hidden += 1;
-    }
+    for (const item of currentWindow()) if (markTurnElement(item.turn)) hidden += 1;
     state.hiddenTurnCount = hidden;
-    if (hidden > 0 || state.hiddenExchangeCount > 0 || keyPosition(state.boundaryKey) > 0) {
-      state.historyAvailable = true;
-    }
+    state.historyAvailable = state.hiddenExchangeCount > 0 || keyPosition(state.boundaryKey) > 0;
     publishCounts();
     updateAccordion();
   }
 
-  function hasAccordionHistory() {
-    if (!state.boundaryKey) return false;
-    const boundaryPosition = keyPosition(state.boundaryKey);
-    return state.historyAvailable || state.hiddenExchangeCount > 0 || boundaryPosition > 0 || state.hiddenTurnCount > 0;
-  }
-
-  function accordionCopy() {
-    const count = Math.max(0, state.hiddenExchangeCount);
-    if (isJapaneseUi()) {
-      if (state.expanded) return `過去の対話を閉じる · 直近${state.n}件に戻る`;
-      return count > 0 ? `過去の対話 ${count}件を表示` : '過去の対話を表示';
-    }
-    if (state.expanded) return `Collapse earlier exchanges · Return to latest ${state.n}`;
-    return count > 0 ? `Show ${count} earlier exchange${count === 1 ? '' : 's'}` : 'Show earlier exchanges';
-  }
-
-  function ensureAccordion() {
-    if (state.accordion?.isConnected) return state.accordion;
-    const button = document.createElement('button');
-    button.id = 'csg-recent-accordion';
-    button.type = 'button';
-    const chevron = document.createElement('span');
-    chevron.className = 'csg-recent-accordion-chevron';
-    chevron.setAttribute('aria-hidden', 'true');
-    chevron.textContent = '⌄';
-    const label = document.createElement('span');
-    label.className = 'csg-recent-accordion-label';
-    button.append(chevron, label);
-    button.addEventListener('click', () => {
-      if (!state.ready || state.accordionTransitioning) return;
-      setAccordionExpanded(!state.expanded);
-    });
-    (document.body || ROOT).appendChild(button);
-    state.accordion = button;
-    state.accordionLabel = label;
-    return button;
-  }
-
-  function layoutAccordion() {
-    const button = state.accordion;
-    if (!button?.isConnected || !state.ready || !hasAccordionHistory() || !state.scrollHost) {
-      if (button) button.hidden = true;
-      return;
-    }
-    const viewport = visualViewportRect();
-    const host = state.scrollHost;
-    const rect = host === document.scrollingElement
-      ? { left: 0, right: viewport.right, top: viewport.top, height: viewport.height }
-      : host.getBoundingClientRect();
-    const left = Math.max(8, Math.max(0, rect.left));
-    const right = Math.min(viewport.right - 8, rect.right || viewport.right);
-    const center = right > left ? left + (right - left) / 2 : viewport.right / 2;
-    button.hidden = false;
-    button.style.left = `${Math.max(8, Math.min(viewport.right - 8, center))}px`;
-    button.style.top = `${Math.max(viewport.top + 10, rect.top + 10)}px`;
-  }
-
   function syncAccordionModeClasses() {
     if (!state.active || !state.ready || state.suspended) return;
-    ROOT.dataset.csgRecentMode = state.expanded ? 'expanded' : 'collapsed';
-    // Keep legacy classes as best-effort markers, but CSS relies on the data
-    // attribute because ChatGPT can rewrite the root class list at any time.
-    ROOT.classList.toggle('csg-show-recent-only', !state.expanded);
-    ROOT.classList.toggle('csg-recent-accordion-expanded', state.expanded);
+    ROOT.dataset.csgRecentMode = 'per-chat';
+    ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
   }
 
   function updateAccordion() {
     if (!state.active) return;
+    document.getElementById('csg-recent-accordion')?.remove();
+    document.getElementById('csg-recent-scrollbar')?.remove();
     syncAccordionModeClasses();
-    const button = ensureAccordion();
-    const history = hasAccordionHistory();
-    const visible = state.ready && history && !state.suspended;
-    button.hidden = !visible;
-    button.dataset.expanded = String(state.expanded);
-    button.setAttribute('aria-expanded', String(state.expanded));
-    if (state.accordionLabel) state.accordionLabel.textContent = accordionCopy();
-    if (visible) layoutAccordion();
-  }
-
-  async function setAccordionExpanded(expanded) {
-    const next = Boolean(expanded);
-    if (!state.ready || state.suspended || next === state.expanded || state.accordionTransitioning) return;
-    state.accordionTransitioning = true;
-    try {
-      if (next) {
-        state.expanded = true;
-        ROOT.classList.remove('csg-show-recent-only');
-        ROOT.classList.add('csg-recent-accordion-expanded');
-        markMountedTurns();
-        if (state.scrollbar) state.scrollbar.hidden = true;
-        updateAccordion();
-        return;
-      }
-
-      // Expanded history can move the virtualizer far enough that the recent-N
-      // boundary no longer exists in the mounted DOM and its cached coordinate is
-      // stale. Recover from the semantic tail instead of trusting that coordinate:
-      // the boundary is only N exchanges from the bottom, so this stays bounded.
-      let boundaryTurn = findMountedByKey(state.boundaryKey);
-      if (!boundaryTurn) {
-        const epoch = state.epoch;
-        if (!(await settleAtBottom(epoch))) return;
-        boundaryTurn = findMountedByKey(state.boundaryKey);
-        for (let attempt = 0; attempt < 48 && !boundaryTurn; attempt += 1) {
-          const before = scrollTop();
-          const nextTop = Math.max(0, before - Math.max(260, viewportHeight() * 0.68));
-          setScrollTop(nextTop);
-          await wait(70);
-          if (!(await mergeStableWindow(epoch, 45))) return;
-          boundaryTurn = findMountedByKey(state.boundaryKey);
-          if (nextTop <= 1 || Math.abs(scrollTop() - before) < 1) break;
-        }
-      }
-      if (!boundaryTurn) {
-        failOpenRecent();
-        return;
-      }
-      syncBoundaryCoordinate();
-      state.expanded = false;
-      ROOT.classList.remove('csg-recent-accordion-expanded');
-      ROOT.classList.add('csg-show-recent-only');
-      markMountedTurns();
-      updateMinimum();
-      scheduleCoordinateStabilization();
-      updateAccordion();
-    } finally {
-      state.accordionTransitioning = false;
-    }
+    document.querySelectorAll('.csg-chat-toggle').forEach((button) => updateExchangeToggle(button, button.dataset.exchangeKey || ''));
   }
 
   function scrollTop() {
@@ -901,14 +835,6 @@
     if (!host) return 0;
     if (host === document.scrollingElement) return window.scrollY || host.scrollTop || 0;
     return host.scrollTop;
-  }
-
-  function setScrollTop(value) {
-    const host = state.scrollHost;
-    if (!host) return;
-    const top = Math.max(0, Number(value) || 0);
-    if (host === document.scrollingElement) window.scrollTo(0, top);
-    else host.scrollTop = top;
   }
 
   function visualViewportRect() {
@@ -925,45 +851,6 @@
   function viewportHeight() {
     const host = state.scrollHost;
     return host === document.scrollingElement ? visualViewportRect().height : (host?.clientHeight || visualViewportRect().height);
-  }
-
-  function maxScrollTop() {
-    return Math.max(0, scrollHeight() - viewportHeight());
-  }
-
-  function effectiveMinScrollTop() {
-    return Math.min(state.minScrollTop, maxScrollTop());
-  }
-
-  function recentTailFitsViewport() {
-    return state.minScrollTop > maxScrollTop() + 2;
-  }
-
-  function boundaryCoordinateInvalid() {
-    if (!state.ready) {
-      state.resizeScrollHeightGuard = null;
-      return false;
-    }
-    const currentHeight = scrollHeight();
-    // A semantic boundary can legitimately sit below maxScrollTop when the
-    // kept recent tail is shorter than the viewport. In that case native
-    // scrolling simply clamps to the bottom; the coordinate is still valid as
-    // long as it remains inside the scrollable content itself.
-    if (state.minScrollTop <= currentHeight + 2) {
-      state.resizeScrollHeightGuard = null;
-      return false;
-    }
-    if (Number.isFinite(state.resizeScrollHeightGuard)) {
-      if (Math.abs(currentHeight - state.resizeScrollHeightGuard) <= 2) return false;
-      state.resizeScrollHeightGuard = null;
-    }
-    return true;
-  }
-
-  function clampRecentTop(value) {
-    const max = maxScrollTop();
-    if (state.minScrollTop > max) return max;
-    return Math.max(state.minScrollTop, Math.min(max, Number(value) || 0));
   }
 
   function scrollHeight() {
@@ -1005,129 +892,24 @@
     return host;
   }
 
-  function topInScrollContent(element) {
-    const host = state.scrollHost;
-    if (!host || !(element instanceof Element)) return null;
-    const rect = element.getBoundingClientRect();
-    if (host === document.scrollingElement) return rect.top + scrollTop();
-    const hostRect = host.getBoundingClientRect();
-    return rect.top - hostRect.top + scrollTop();
-  }
-
   function findMountedByKey(key) {
     if (!key) return null;
     for (const item of currentWindow()) if (item.key === key) return item.turn;
     return null;
   }
 
-  function adoptBoundary(key, allowBackward = false) {
-    const boundaryTurn = findMountedByKey(key);
-    const mountedTop = boundaryTurn instanceof Element ? topInScrollContent(boundaryTurn) : null;
-    const cachedTop = state.keyTops.get(key);
-    const boundaryTop = Number.isFinite(mountedTop) ? mountedTop : cachedTop;
-    if (!Number.isFinite(boundaryTop)) return false;
-    if (!allowBackward && state.ready && boundaryTop < state.minScrollTop - 1) return false;
+  function adoptBoundary(key, _allowBackward = false) {
+    if (!key || keyPosition(key) < 0) return false;
     state.boundaryKey = key;
-    state.boundaryProvisional = !(boundaryTurn instanceof Element);
     state.pendingBoundaryKey = '';
-    state.minScrollTop = Math.max(0, boundaryTop);
     updateMinimum();
-    scheduleCoordinateStabilization();
-    return true;
-  }
-
-  function clearBoundaryGrace() {
-    clearTimeout(state.boundaryGraceTimer);
-    state.boundaryGraceTimer = 0;
-  }
-
-  function scheduleBoundaryGrace() {
-    if (state.boundaryGraceTimer || !state.ready || !state.boundaryProvisional || recentTailFitsViewport()) return;
-    const epoch = state.epoch;
-    state.boundaryGraceTimer = setTimeout(() => {
-      state.boundaryGraceTimer = 0;
-      if (!isCurrentEpoch(epoch) || !state.ready || !state.boundaryProvisional) return;
-      const boundaryTurn = findMountedByKey(state.boundaryKey);
-      if (boundaryTurn) {
-        syncBoundaryCoordinate();
-        updateMinimum();
-        return;
-      }
-      if (scrollTop() <= effectiveMinScrollTop() + 2) failOpenRecent();
-    }, 160);
-  }
-
-  function syncBoundaryCoordinate() {
-    if (!state.ready || !state.boundaryKey) return false;
-    const boundaryTurn = findMountedByKey(state.boundaryKey);
-    if (!(boundaryTurn instanceof Element)) {
-      state.boundaryProvisional = true;
-      return false;
-    }
-    const boundaryTop = topInScrollContent(boundaryTurn);
-    if (!Number.isFinite(boundaryTop)) return false;
-    state.minScrollTop = Math.max(0, boundaryTop);
-    state.boundaryProvisional = false;
-    clearBoundaryGrace();
-    state.keyTops.set(state.boundaryKey, state.minScrollTop);
     return true;
   }
 
   function updateMinimum() {
     if (!state.ready) return;
-    // Keep recent-N's UI/state invariant alive even if ChatGPT rewrites root
-    // attributes or removes extension-owned top-level DOM between virtualizer
-    // passes. This maintenance path already runs every 750 ms while ready.
     syncAccordionModeClasses();
     updateAccordion();
-    // ChatGPT's virtualizer can revise its total-height estimate without changing
-    // the mounted turn structure. If the semantic boundary is currently mounted,
-    // always refresh its physical coordinate before clamping or laying out the bar.
-    syncBoundaryCoordinate();
-    if (state.expanded) {
-      state.recentContentHeight = Math.max(viewportHeight(), scrollHeight());
-      if (state.scrollbar) state.scrollbar.hidden = true;
-      layoutAccordion();
-      return;
-    }
-    if (boundaryCoordinateInvalid()) {
-      failOpenRecent();
-      return;
-    }
-    state.recentContentHeight = Math.max(viewportHeight(), scrollHeight() - state.minScrollTop);
-    const current = scrollTop();
-    const effectiveMin = effectiveMinScrollTop();
-    if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (current < effectiveMin - 2) {
-        failOpenRecent();
-        return;
-      }
-      if (current <= effectiveMin + 2) {
-        scheduleBoundaryGrace();
-        layoutScrollbar();
-        return;
-      }
-    }
-    if (current < effectiveMin - 1) setScrollTop(effectiveMin);
-    layoutScrollbar();
-  }
-
-  function scheduleCoordinateStabilization() {
-    state.coordinateGeneration += 1;
-    const generation = state.coordinateGeneration;
-    const epoch = state.epoch;
-    clearTimeout(state.coordinateTimer);
-    clearBoundaryGrace();
-    state.coordinateTimer = 0;
-    let remaining = 12;
-    const tick = () => {
-      state.coordinateTimer = 0;
-      if (generation !== state.coordinateGeneration || !state.ready || !isCurrentEpoch(epoch)) return;
-      updateMinimum();
-      remaining -= 1;
-      if (remaining > 0) state.coordinateTimer = setTimeout(tick, 250);
-    };
-    state.coordinateTimer = setTimeout(tick, 100);
   }
 
   function atBottom(tolerance = 8) {
@@ -1151,64 +933,14 @@
     return state.active && !state.suspended && state.epoch === epoch && state.route === location.pathname;
   }
 
-  async function settleAtBottom(epoch = null) {
-    for (let i = 0; i < 4; i += 1) {
-      if (epoch !== null && !isCurrentEpoch(epoch)) return false;
-      setScrollTop(scrollHeight());
-      await wait(80 + i * 30);
-      if (epoch !== null && !isCurrentEpoch(epoch)) return false;
-      mergeWindow(currentWindow());
-    }
-    return true;
-  }
-
-  function captureViewportAnchor() {
-    const top = scrollTop();
-    for (const item of currentWindow()) {
-      const itemTop = topInScrollContent(item.turn);
-      const height = item.turn.getBoundingClientRect().height;
-      if (Number.isFinite(itemTop) && itemTop + height > top + 1) {
-        return { key: item.key, offset: itemTop - top };
-      }
-    }
-    return null;
-  }
-
-  async function restoreInitialPosition(initialTop, initialWasBottom, initialAnchor, epoch = null) {
-    if (initialWasBottom) {
-      setScrollTop(maxScrollTop());
-      return;
-    }
-    if (initialTop < state.minScrollTop || (initialAnchor?.key && isOldKey(initialAnchor.key))) {
-      setScrollTop(state.minScrollTop);
-      return;
-    }
-    setScrollTop(clampRecentTop(initialTop));
-    if (!initialAnchor?.key) return;
-    await wait(100);
-    if (epoch !== null && !isCurrentEpoch(epoch)) return;
-    mergeWindow(currentWindow());
-    const anchorTurn = findMountedByKey(initialAnchor.key);
-    if (!anchorTurn || isOldKey(initialAnchor.key)) return;
-    const anchorTop = topInScrollContent(anchorTurn);
-    if (Number.isFinite(anchorTop)) setScrollTop(clampRecentTop(anchorTop - initialAnchor.offset));
-  }
-
   function failOpenRecent() {
-    state.coordinateGeneration += 1;
-    clearTimeout(state.coordinateTimer);
-    state.coordinateTimer = 0;
     state.ready = false;
     state.recovering = false;
     state.suspended = true;
-    state.boundaryProvisional = false;
-    state.expanded = false;
-    state.accordionTransitioning = false;
+    state.exchangeOverrides.clear();
     clearMountedMarks();
     delete ROOT.dataset.csgRecentMode;
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
-    if (state.scrollbar) state.scrollbar.hidden = true;
-    if (state.accordion) state.accordion.hidden = true;
     detachScrollHost();
     publishState('degraded');
   }
@@ -1237,141 +969,57 @@
       state.scrollHost = findScrollHost(turns[turns.length - 1]);
       attachScrollHost();
       updateLoadingIndicator('latest');
-      const initialTop = scrollTop();
-      const initialWasBottom = atBottom(24);
-      const initialAnchor = captureViewportAnchor();
-      if (!(await settleAtBottom(epoch))) return;
 
-      let reachedTop = false;
-      let steps = 0;
-      while (!boundaryDiscoveryComplete() && steps < 240) {
-        const before = scrollTop();
-        const next = Math.max(0, before - Math.max(260, viewportHeight() * 0.68));
-        setScrollTop(next);
-        await wait(75);
-        if (!(await mergeStableWindow(epoch))) return;
+      // Learn only what ChatGPT has already mounted. Recent-N must never scroll
+      // the host just to discover older history; native/user scrolling will
+      // progressively extend state.sequence later through refreshStructure().
+      for (let pass = 0; pass < 3; pass += 1) {
+        mergeWindow(currentWindow());
+        if (pass < 2) await wait(70);
+        if (!isCurrentEpoch(epoch)) return;
+      }
+
+      const starts = exchangeStartKeys();
+      if (!starts.length) {
+        publishState('preparing');
+        updateLoadingIndicator('latest');
+        const retryEpoch = epoch;
+        setTimeout(() => {
+          if (isCurrentEpoch(retryEpoch) && !state.suspended && !state.initializing && !state.recovering) discoverBoundary();
+        }, 150);
+        return;
+      }
+
+      state.boundaryKey = computeBoundary();
+      if (!state.boundaryKey) {
+        publishState('preparing');
         updateLoadingIndicator('history');
-        steps += 1;
-        if (scrollTop() <= 1 || Math.abs(scrollTop() - before) < 1) {
-          reachedTop = true;
-          break;
-        }
-      }
-
-      const boundary = computeBoundary();
-      if (!boundary) {
-        await settleAtBottom(epoch);
-        if (!isCurrentEpoch(epoch)) return;
-        // A SPA route can briefly expose an incomplete turn tree. Keep the page
-        // fail-open while stable role data is still arriving instead of flashing
-        // an unavailable state that will immediately retry.
-        publishState('waiting');
-        return;
-      }
-      // If fewer than N user turns exist, reaching the physical top proves that
-      // the whole conversation is already within the requested recent window.
-      if (!boundaryDiscoveryComplete() && !reachedTop) {
-        await settleAtBottom(epoch);
-        if (!isCurrentEpoch(epoch)) return;
-        publishState('waiting');
+        const retryEpoch = epoch;
+        setTimeout(() => {
+          if (isCurrentEpoch(retryEpoch) && !state.suspended && !state.initializing && !state.recovering) discoverBoundary();
+        }, 150);
         return;
       }
 
-      state.boundaryKey = boundary;
       updateLoadingIndicator('finalizing');
-      let boundaryTurn = findMountedByKey(state.boundaryKey);
-      if (!boundaryTurn) {
-        for (let i = 0; i < 160 && !boundaryTurn; i += 1) {
-          const before = scrollTop();
-          const next = Math.max(0, before - Math.max(260, viewportHeight() * 0.68));
-          setScrollTop(next);
-          await wait(75);
-          if (!(await mergeStableWindow(epoch))) return;
-          updateLoadingIndicator('finalizing');
-          boundaryTurn = findMountedByKey(state.boundaryKey);
-          if (next <= 1 && !boundaryTurn) break;
-        }
-      }
-      if (!boundaryTurn) {
-        await settleAtBottom(epoch);
-        if (!isCurrentEpoch(epoch)) return;
-        publishState('waiting');
+      const boundaryTurn = findMountedByKey(state.boundaryKey);
+      if (!(boundaryTurn instanceof Element) || !validateBoundaryKey(state.boundaryKey)) {
+        state.boundaryKey = '';
+        publishState('preparing');
+        updateLoadingIndicator('history');
+        const retryEpoch = epoch;
+        setTimeout(() => {
+          if (isCurrentEpoch(retryEpoch) && !state.suspended && !state.initializing && !state.recovering) discoverBoundary();
+        }, 150);
         return;
       }
 
-      const boundaryRole = turnRole(boundaryTurn);
-      let boundaryAssistant = false;
-      if (!isShareRoute()) {
-        if (boundaryRole !== 'user') {
-          if (boundaryRole === 'assistant') {
-            const previous = state.roleValidation.get(state.boundaryKey);
-            const count = previous?.role === 'assistant' ? previous.count + 1 : 1;
-            state.roleValidation.set(state.boundaryKey, { role: 'assistant', count });
-            if (count >= 2) state.roleLocks.set(state.boundaryKey, 'assistant');
-          }
-          state.roles.delete(state.boundaryKey);
-          state.roleEvidence.delete(state.boundaryKey);
-          state.boundaryKey = '';
-          state.hiddenExchangeCount = Math.max(0, userKeys().length - state.n);
-          await settleAtBottom(epoch);
-          if (!isCurrentEpoch(epoch)) return;
-          publishState('waiting');
-          const retryEpoch = epoch;
-          setTimeout(() => {
-            if (isCurrentEpoch(retryEpoch) && !state.suspended && !state.initializing && !state.recovering) discoverBoundary();
-          }, 0);
-          return;
-        }
-      } else {
-        boundaryAssistant = boundaryRole === 'assistant' &&
-          state.assistantContent.get(state.boundaryKey) === true;
-        if (boundaryRole !== 'user' && !boundaryAssistant) {
-          state.roles.delete(state.boundaryKey);
-          state.assistantContent.delete(state.boundaryKey);
-          state.roleEvidence.delete(state.boundaryKey);
-          state.boundaryKey = '';
-          state.hiddenExchangeCount = Math.max(0, exchangeStartKeys().length - state.n);
-          await settleAtBottom(epoch);
-          if (!isCurrentEpoch(epoch)) return;
-          publishState('waiting');
-          const retryEpoch = epoch;
-          setTimeout(() => {
-            if (isCurrentEpoch(retryEpoch) && !state.suspended && !state.initializing && !state.recovering) discoverBoundary();
-          }, 0);
-          return;
-        }
-      }
-
-      state.roleLocks.set(state.boundaryKey, boundaryAssistant ? 'assistant' : 'user');
-      state.roles.set(state.boundaryKey, boundaryAssistant ? 'assistant' : 'user');
-      if (boundaryAssistant) state.assistantContent.set(state.boundaryKey, true);
-      const boundaryTop = topInScrollContent(boundaryTurn);
-      if (!Number.isFinite(boundaryTop)) {
-        await settleAtBottom(epoch);
-        if (!isCurrentEpoch(epoch)) return;
-        publishState('waiting');
-        return;
-      }
-      state.minScrollTop = Math.max(0, boundaryTop);
-      state.boundaryProvisional = false;
-      state.keyTops.set(state.boundaryKey, state.minScrollTop);
       state.ready = true;
-      state.expanded = false;
-      state.accordionTransitioning = false;
-      state.recentContentHeight = Math.max(viewportHeight(), scrollHeight() - state.minScrollTop);
-      ROOT.classList.remove('csg-recent-accordion-expanded');
-      ROOT.classList.add('csg-show-recent-only');
-      state.scrollHost?.classList?.add('csg-recent-scrollhost');
+      ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
       markMountedTurns();
       updateAccordion();
-      await restoreInitialPosition(initialTop, initialWasBottom, initialAnchor, epoch);
-      if (!isCurrentEpoch(epoch)) return;
       updateMinimum();
-      // updateMinimum() may fail open if ChatGPT revised the virtualized
-      // boundary while finalization was in progress. Never overwrite that
-      // degraded state with a stale ready publication.
       if (!isCurrentEpoch(epoch) || !state.ready || state.suspended) return;
-      scheduleCoordinateStabilization();
       publishState('ready');
     } catch (_error) {
       if (isCurrentEpoch(epoch)) failOpenRecent();
@@ -1469,9 +1117,6 @@
     if (!boundaryMovesForward(candidate)) return false;
     const mounted = findMountedByKey(candidate);
     if (!mounted) {
-      if (isStableBoundaryKey(candidate) && Number.isFinite(state.keyTops.get(candidate)) && adoptBoundary(candidate, true)) {
-        return true;
-      }
       state.pendingBoundaryKey = candidate;
       return false;
     }
@@ -1479,14 +1124,18 @@
       if (state.pendingBoundaryKey === candidate) state.pendingBoundaryKey = '';
       return false;
     }
-    // The candidate is already proven to be semantically newer. ChatGPT may
-    // concurrently shrink virtualizer spacer estimates, so its new physical top
-    // can legitimately be smaller than the stale previous minScrollTop.
     if (adoptBoundary(candidate, true)) return true;
     state.pendingBoundaryKey = candidate;
     return false;
   }
 
+
+  function tryExpandPrivateBoundary(candidate) {
+    if (isShareRoute() || !boundaryMovesBackward(candidate)) return false;
+    const mounted = findMountedByKey(candidate);
+    if (!mounted || !validateBoundaryKey(candidate)) return false;
+    return adoptBoundary(candidate, true);
+  }
 
   function tryExpandShareBoundary(candidate) {
     if (!isShareRoute() || !boundaryMovesBackward(candidate)) return false;
@@ -1531,12 +1180,9 @@
     if (state.pendingBoundaryKey) tryAdvanceBoundary(state.pendingBoundaryKey);
     const candidate = computeBoundary();
     if (candidate && candidate !== state.boundaryKey) {
-      if (!tryAdvanceBoundary(candidate)) tryExpandShareBoundary(candidate);
+      if (!tryAdvanceBoundary(candidate) && !tryExpandPrivateBoundary(candidate)) tryExpandShareBoundary(candidate);
     }
     markMountedTurns();
-    // Hiding old turns can change virtualizer geometry. Re-read the mounted
-    // semantic boundary after that DOM change before clamping the scroll range.
-    syncBoundaryCoordinate();
     updateMinimum();
   }
 
@@ -1569,7 +1215,8 @@
           if (wasTurnTestId || target?.matches(TURN_SELECTOR) || target?.closest(TURN_SELECTOR)) {
             structureChanged = true;
             if (wasTurnTestId && target && !target.matches(TURN_SELECTOR)) {
-              target.classList.remove('csg-hidden-old-turn');
+              target.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
+              target.querySelector(':scope > .csg-chat-toggle')?.remove();
             }
           }
           continue;
@@ -1579,6 +1226,10 @@
         if (targetTurn) {
           const key = turnKey(targetTurn);
           if (!key || !isOldKey(key)) recentContentChanged = true;
+          if ([...mutation.removedNodes].some((node) =>
+            node instanceof Element && node.classList.contains('csg-chat-toggle'))) {
+            structureChanged = true;
+          }
           if (isShareRoute() && key && turnRole(targetTurn) === 'assistant' &&
               state.assistantContent.get(key) !== true) {
             state.assistantContentDirty.add(key);
@@ -1611,280 +1262,19 @@
   }
 
   function attachScrollHost() {
-    if (!state.scrollHost || state.scrollHost.dataset.csgRecentBound === '1') return;
+    if (!state.scrollHost) return;
     state.scrollHost.dataset.csgRecentBound = '1';
-    if (state.scrollHost === document.scrollingElement) {
-      window.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('wheel', onWheel, { passive: false });
-    } else {
-      state.scrollHost.addEventListener('scroll', onScroll, { passive: true });
-      state.scrollHost.addEventListener('wheel', onWheel, { passive: false });
-    }
-    ensureScrollbar();
   }
 
   function detachScrollHost() {
     const host = state.scrollHost;
     if (!host) return;
-    if (host === document.scrollingElement) {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('wheel', onWheel);
-    } else {
-      host.removeEventListener('scroll', onScroll);
-      host.removeEventListener('wheel', onWheel);
-    }
     delete host.dataset.csgRecentBound;
-    host.classList?.remove('csg-recent-scrollhost');
     state.scrollHost = null;
   }
 
   function onResize() {
-    if (!state.ready) return;
-    state.resizeScrollHeightGuard = scrollHeight();
-    syncBoundaryCoordinate();
-    layoutAccordion();
-    layoutScrollbar();
-  }
-
-  function onVisualViewportChange() {
-    if (!state.ready) return;
-    layoutAccordion();
-    layoutScrollbar();
-  }
-
-  function onScroll() {
-    if (!state.ready) return;
-    if (state.expanded) {
-      syncBoundaryCoordinate();
-      layoutAccordion();
-      return;
-    }
-    // Virtualizer height corrections can move the mounted semantic boundary while
-    // simultaneously adjusting scrollTop. Re-anchor before enforcing the range.
-    syncBoundaryCoordinate();
-    if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      const current = scrollTop();
-      const effectiveMin = effectiveMinScrollTop();
-      if (current < effectiveMin - 2) {
-        failOpenRecent();
-        return;
-      }
-      if (current <= effectiveMin + 2) {
-        scheduleBoundaryGrace();
-        layoutScrollbar();
-        return;
-      }
-    }
-    if (boundaryCoordinateInvalid()) {
-      failOpenRecent();
-      return;
-    }
-    const effectiveMin = effectiveMinScrollTop();
-    if (scrollTop() < effectiveMin - 1) {
-      setScrollTop(effectiveMin);
-      return;
-    }
-    layoutScrollbar();
-  }
-
-  function wheelDeltaPixels(event) {
-    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
-    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * viewportHeight();
-    return event.deltaY;
-  }
-
-  function nestedScrollableFor(target, deltaY) {
-    const host = state.scrollHost;
-    for (let node = target instanceof Element ? target : target?.parentElement; node && node !== host; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      if (!/(auto|scroll|overlay)/.test(style.overflowY) || node.scrollHeight <= node.clientHeight + 1) continue;
-      if (deltaY < 0 && node.scrollTop > 0) return node;
-      if (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1) return node;
-    }
-    return null;
-  }
-
-  function onWheel(event) {
-    if (!state.ready || state.expanded || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-    syncBoundaryCoordinate();
-    if (boundaryCoordinateInvalid()) {
-      event.preventDefault();
-      failOpenRecent();
-      return;
-    }
-    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-    const delta = wheelDeltaPixels(event);
-    if (nestedScrollableFor(event.target, delta)) return;
-    const before = scrollTop();
-    const effectiveMin = effectiveMinScrollTop();
-    if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (before < effectiveMin - 2) {
-        failOpenRecent();
-        return;
-      }
-      if (before <= effectiveMin + 2 && delta < 0) {
-        event.preventDefault();
-        setScrollTop(effectiveMin);
-        scheduleBoundaryGrace();
-        return;
-      }
-    }
-    const target = clampRecentTop(before + delta);
-    // Only block a gesture that would cross the semantic recent-N boundary.
-    // Otherwise let the browser/ChatGPT keep native trackpad momentum and smoothness.
-    if (delta < 0 && before <= effectiveMin + 1) {
-      event.preventDefault();
-      setScrollTop(effectiveMin);
-      layoutScrollbar();
-      return;
-    }
-    requestAnimationFrame(() => {
-      if (!state.ready) return;
-      const after = scrollTop();
-      // Some ChatGPT builds expose a programmatic scroll root with overflow:hidden.
-      // If native/default handling did nothing, fall back once without replacing
-      // a functioning native scroll path.
-      if (Math.abs(after - before) < 0.5 && Math.abs(target - before) > 0.5) setScrollTop(target);
-      else if (after < effectiveMin - 1) setScrollTop(effectiveMin);
-      layoutScrollbar();
-    });
-  }
-
-  function isInteractiveKeyTarget(target) {
-    if (!(target instanceof Element)) return false;
-    return Boolean(target.closest(
-      'input,textarea,select,button,a[href],summary,[contenteditable="true"],' +
-      '[role="textbox"],[role="button"],[role="link"],[role="checkbox"],[role="switch"],' +
-      '[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],' +
-      '[role="combobox"],[role="slider"],[role="spinbutton"],[role="radio"],' +
-      '[role="tab"],[role="treeitem"],[role="option"],[role="dialog"],[aria-modal="true"],' +
-      '[tabindex]:not([tabindex="-1"])'
-    ));
-  }
-
-  function onKeyDown(event) {
-    if (!state.ready || state.expanded || isInteractiveKeyTarget(event.target) || isInteractiveKeyTarget(document.activeElement)) return;
-    syncBoundaryCoordinate();
-    const current = scrollTop();
-    const effectiveMin = effectiveMinScrollTop();
-    let target = null;
-    if (event.key === 'Home' && !event.ctrlKey && !event.metaKey) target = effectiveMin;
-    else if (event.key === 'End' && !event.ctrlKey && !event.metaKey) target = maxScrollTop();
-    else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) target = current - viewportHeight() * 0.9;
-    else if (event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey)) target = current + viewportHeight() * 0.9;
-    else if (event.key === 'ArrowUp') target = current - 48;
-    else if (event.key === 'ArrowDown') target = current + 48;
-    if (target === null) return;
-
-    const direction = target < current ? -1 : target > current ? 1 : 0;
-    const keyTarget = event.target instanceof Element && event.target !== document.body
-      ? event.target
-      : document.activeElement;
-    if (direction && nestedScrollableFor(keyTarget, direction)) return;
-
-    if (state.boundaryProvisional && !findMountedByKey(state.boundaryKey)) {
-      if (current < effectiveMin - 2) {
-        failOpenRecent();
-        return;
-      }
-      if (target <= effectiveMin + 2) {
-        event.preventDefault();
-        setScrollTop(effectiveMin);
-        scheduleBoundaryGrace();
-        return;
-      }
-    }
-    if (boundaryCoordinateInvalid()) {
-      event.preventDefault();
-      failOpenRecent();
-      return;
-    }
-    event.preventDefault();
-    setScrollTop(clampRecentTop(target));
-    layoutScrollbar();
-  }
-
-  function ensureScrollbar() {
-    if (state.scrollbar?.isConnected) return;
-    const track = document.createElement('div');
-    track.id = 'csg-recent-scrollbar';
-    track.setAttribute('aria-hidden', 'true');
-    const thumb = document.createElement('div');
-    thumb.id = 'csg-recent-scrollbar-thumb';
-    track.appendChild(thumb);
-    document.documentElement.appendChild(track);
-    state.scrollbar = track;
-    state.thumb = thumb;
-
-    thumb.addEventListener('pointerdown', (event) => {
-      if (!state.ready) return;
-      event.preventDefault();
-      const thumbRect = thumb.getBoundingClientRect();
-      thumb.setPointerCapture?.(event.pointerId);
-      state.drag = { grabOffset: Math.max(0, event.clientY - thumbRect.top) };
-    });
-    thumb.addEventListener('pointermove', (event) => {
-      if (!state.drag || !state.ready) return;
-      updateMinimum();
-      const trackRect = track.getBoundingClientRect();
-      const thumbRect = thumb.getBoundingClientRect();
-      const recentRange = Math.max(viewportHeight(), state.recentContentHeight);
-      const scrollable = Math.max(0, recentRange - viewportHeight());
-      const travel = Math.max(1, trackRect.height - thumbRect.height);
-      const desired = Math.max(0, Math.min(travel, event.clientY - trackRect.top - state.drag.grabOffset));
-      setScrollTop(state.minScrollTop + (desired / travel) * scrollable);
-      layoutScrollbar();
-    });
-    const endDrag = () => { state.drag = null; };
-    thumb.addEventListener('pointerup', endDrag);
-    thumb.addEventListener('pointercancel', endDrag);
-    track.addEventListener('pointerdown', (event) => {
-      if (event.target === thumb || !state.ready) return;
-      const rect = track.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)));
-      const scrollable = Math.max(0, state.recentContentHeight - viewportHeight());
-      setScrollTop(state.minScrollTop + ratio * scrollable);
-    });
-    layoutScrollbar();
-  }
-
-  function layoutScrollbar() {
-    if (!state.scrollbar || !state.thumb || !state.scrollHost || !state.ready || state.expanded) {
-      if (state.scrollbar) state.scrollbar.hidden = true;
-      return;
-    }
-    syncBoundaryCoordinate();
-    if (boundaryCoordinateInvalid()) {
-      state.scrollbar.hidden = true;
-      failOpenRecent();
-      return;
-    }
-    const host = state.scrollHost;
-    const viewport = visualViewportRect();
-    const rect = host === document.scrollingElement
-      ? { top: viewport.top, right: viewport.right, height: viewport.height }
-      : host.getBoundingClientRect();
-    const trackTop = Math.max(viewport.top, rect.top);
-    const visibleBottom = Math.min(viewport.bottom, rect.top + rect.height);
-    const trackHeight = Math.max(28, visibleBottom - trackTop);
-    state.scrollbar.hidden = false;
-    Object.assign(state.scrollbar.style, {
-      top: `${trackTop}px`,
-      right: `${Math.max(0, window.innerWidth - Math.min(rect.right, viewport.right) + 2)}px`,
-      height: `${trackHeight}px`
-    });
-
-    const recentRange = Math.max(viewportHeight(), state.recentContentHeight);
-    const scrollable = Math.max(0, recentRange - viewportHeight());
-    if (scrollable <= 1) {
-      state.thumb.hidden = true;
-      return;
-    }
-    state.thumb.hidden = false;
-    const thumbHeight = Math.max(28, trackHeight * (viewportHeight() / recentRange));
-    const current = Math.max(0, Math.min(scrollable, scrollTop() - state.minScrollTop));
-    const top = (current / scrollable) * Math.max(0, trackHeight - thumbHeight);
-    Object.assign(state.thumb.style, { height: `${thumbHeight}px`, transform: `translateY(${top}px)` });
+    if (state.ready) updateMinimum();
   }
 
   function publishCounts() {
@@ -1903,6 +1293,8 @@
       updateLoadingIndicator('ready');
       removeLoadingIndicator(true);
     } else if (value === 'waiting') {
+      clearTimeout(state.loadingRemoveTimer);
+      state.loadingRemoveTimer = 0;
       updateLoadingIndicator('waiting');
     } else if (value === 'preparing') {
       updateLoadingIndicator('detecting');
@@ -1911,33 +1303,27 @@
 
   function clearMountedMarks() {
     document.querySelectorAll('.csg-hidden-old-turn').forEach((turn) => turn.classList.remove('csg-hidden-old-turn'));
+    document.querySelectorAll('.csg-chat-collapsed').forEach((turn) => turn.classList.remove('csg-chat-collapsed'));
+    document.querySelectorAll('.csg-chat-toggle').forEach((button) => button.remove());
   }
 
   function resetForRoute() {
     state.epoch += 1;
-    state.coordinateGeneration += 1;
     clearTimeout(state.scheduled);
     clearTimeout(state.contentTimer);
     clearTimeout(state.roleConfirmTimer);
-    clearTimeout(state.coordinateTimer);
     clearTimeout(state.loadingRemoveTimer);
     state.loadingRemoveTimer = 0;
     clearLoadingWatchdog();
     removeLoadingIndicator(false);
-    clearBoundaryGrace();
     state.scheduled = 0;
     state.contentTimer = 0;
     state.roleConfirmTimer = 0;
-    state.coordinateTimer = 0;
     state.initializing = false;
     state.initializingEpoch = -1;
     state.recovering = false;
     state.recoveryEpoch = -1;
     state.suspended = false;
-    state.boundaryProvisional = false;
-    state.expanded = false;
-    state.accordionTransitioning = false;
-    state.resizeScrollHeightGuard = null;
     clearMountedMarks();
     detachScrollHost();
     state.ready = false;
@@ -1953,22 +1339,18 @@
     state.ambiguousLateNumeric.clear();
     state.messageIds.clear();
     state.identityEvidence.clear();
-    state.keyTops.clear();
     state.missingEvidence.clear();
+    state.exchangeOverrides.clear();
     state.boundaryKey = '';
     state.pendingBoundaryKey = '';
     state.hiddenExchangeCount = 0;
     state.hiddenTurnCount = 0;
     state.historyAvailable = false;
-    state.recentContentHeight = 0;
-    state.minScrollTop = 0;
     state.lastMergeScrollTop = null;
     state.lastWindowKeys = [];
     state.bottomTailEvidence = null;
     delete ROOT.dataset.csgRecentMode;
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
-    if (state.scrollbar) state.scrollbar.hidden = true;
-    if (state.accordion) state.accordion.hidden = true;
     publishState('preparing');
     armLoadingWatchdog();
   }
@@ -1985,9 +1367,6 @@
     armLoadingWatchdog();
     attachObserver();
     window.addEventListener('resize', onResize, { passive: true });
-    window.visualViewport?.addEventListener('resize', onVisualViewportChange, { passive: true });
-    window.visualViewport?.addEventListener('scroll', onVisualViewportChange, { passive: true });
-    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('popstate', onRouteSignal, true);
     window.navigation?.addEventListener?.('currententrychange', onRouteSignal);
     setInterval(() => {

@@ -250,14 +250,17 @@ async function snapshot(cdp) {
         recentState: '',
         recentMode: '',
         hiddenOldTurns: 0,
+        foldedTurns: 0,
         hiddenOldExchanges: 0,
-        accordionExists: false,
-        accordionHidden: null,
+        chatToggleCount: 0,
+        globalRecentUi: false,
       };
     }
     const turns = [...document.querySelectorAll(${JSON.stringify(TURN_SELECTOR)})];
     const hidden = turns.filter(turn => turn.classList.contains('csg-hidden-old-turn')).length;
-    const accordion = document.getElementById('csg-recent-accordion');
+    const folded = turns.filter(turn => turn.classList.contains('csg-chat-collapsed')).length;
+    const toggles = document.querySelectorAll('.csg-chat-toggle').length;
+    const globalRecentUi = Boolean(document.getElementById('csg-recent-accordion') || document.getElementById('csg-recent-scrollbar'));
     return {
       url: location.href,
       turnCount: turns.length,
@@ -265,9 +268,10 @@ async function snapshot(cdp) {
       recentState: root.dataset.csgRecentState || '',
       recentMode: root.dataset.csgRecentMode || '',
       hiddenOldTurns: hidden,
+      foldedTurns: folded,
       hiddenOldExchanges: Number(root.dataset.csgRecentHiddenExchanges || 0),
-      accordionExists: Boolean(accordion),
-      accordionHidden: accordion ? Boolean(accordion.hidden) : null,
+      chatToggleCount: toggles,
+      globalRecentUi,
     };
   })()`);
 }
@@ -330,9 +334,10 @@ async function runSmoke() {
 
       const failures = [];
       if (core.turnCount < 4) failures.push(`too few turns after core injection: ${core.turnCount}`);
-      if (recent.recentMode !== 'collapsed') failures.push(`Recent-N mode is ${recent.recentMode || '(empty)'}`);
-      if (recent.hiddenOldTurns < 1) failures.push('Recent-N did not hide any earlier mounted turn');
-      if (!recent.accordionExists || recent.accordionHidden) failures.push('Recent-N history accordion is missing/hidden');
+      if (recent.recentMode !== 'per-chat') failures.push(`Recent-N mode is ${recent.recentMode || '(empty)'}`);
+      if (recent.hiddenOldTurns + recent.foldedTurns < 1) failures.push('Recent-N did not fold any earlier mounted chat');
+      if (recent.chatToggleCount < 1) failures.push('Per-chat fold toggles are missing');
+      if (recent.globalRecentUi) failures.push('Legacy fixed Recent-N UI is still present');
 
       return { targetUrl: TARGET_URL, core, recent, failures };
     } catch (error) {

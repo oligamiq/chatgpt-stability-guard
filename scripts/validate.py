@@ -101,10 +101,13 @@ recent_js = (ROOT / 'recent-window.js').read_text()
 content_css = (ROOT / 'content.css').read_text()
 check('max-width:100vw' in popup_css and '(pointer: coarse)' in popup_css,
       'popup.css missing responsive coarse-pointer/mobile layout')
-check('window.visualViewport' in recent_js and 'onVisualViewportChange' in recent_js,
-      'recent-window.js missing Visual Viewport tracking for mobile browser chrome/keyboard changes')
-check('@media (pointer: coarse)' in content_css and '#csg-recent-scrollbar' in content_css,
-      'content.css missing coarse-pointer recent scrollbar sizing')
+check("ROOT.dataset.csgRecentMode = 'per-chat'" in recent_js and '.csg-chat-toggle' in recent_js and
+      'setScrollTop' not in recent_js and "addEventListener('wheel'" not in recent_js,
+      'recent-window.js must use per-chat folding without owning native scroll')
+check('@media (pointer: coarse)' in content_css and '.csg-chat-toggle' in content_css,
+      'content.css missing coarse-pointer per-chat toggle sizing')
+check('#csg-recent-accordion' not in content_css and '#csg-recent-scrollbar' not in content_css,
+      'content.css still contains legacy fixed Recent-N UI')
 
 popup_html = (ROOT / 'popup.html').read_text()
 popup_js = (ROOT / 'popup.js').read_text()

@@ -73,6 +73,8 @@ def run_case(
     expected_accordion_hidden=None,
     accordion_label_contains=None,
     expected_scroll_host_id=None,
+    expected_scroll_top=None,
+    expected_global_ui=None,
 ):
     checks_json = json.dumps(checks, ensure_ascii=False)
     page = f'''<!doctype html><html><head><meta charset="utf-8"><style>
@@ -94,7 +96,9 @@ setTimeout(()=>{{
   const results=__checks.map(c=>{{
     const el=document.querySelector(c.selector);
     const hidden=!!el?.classList.contains('csg-hidden-old-turn');
-    return {{name:c.name,actual:hidden,expected:c.hidden,exists:!!el,pass:!!el&&hidden===c.hidden}};
+    const collapsed=!!el?.classList.contains('csg-chat-collapsed');
+    const folded=hidden||collapsed;
+    return {{name:c.name,actual:folded,hidden,collapsed,expected:c.hidden,exists:!!el,pass:!!el&&folded===c.hidden}};
   }});
   const s=window.__csgRecentTestState;
   const out=document.createElement('pre');
@@ -108,6 +112,8 @@ setTimeout(()=>{{
     accordionHidden:document.getElementById('csg-recent-accordion')?.hidden ?? null,
     accordionLabel:document.getElementById('csg-recent-accordion')?.innerText || '',
     scrollHostId:s?.scrollHost?.id || '',
+    scrollTop:s?.scrollHost?.scrollTop ?? null,
+    globalUi:!!document.getElementById('csg-recent-accordion') || !!document.getElementById('csg-recent-scrollbar'),
     sequence:s?.sequence||[],
     results
   }});
@@ -160,9 +166,11 @@ setTimeout(()=>{{
     accordion_hidden_bad = expected_accordion_hidden is not None and payload.get('accordionHidden') is not expected_accordion_hidden
     accordion_label_bad = accordion_label_contains is not None and accordion_label_contains not in payload.get('accordionLabel', '')
     scroll_host_bad = expected_scroll_host_id is not None and payload.get('scrollHostId') != expected_scroll_host_id
+    scroll_top_bad = expected_scroll_top is not None and abs((payload.get('scrollTop') or 0) - expected_scroll_top) > 1
+    global_ui_bad = expected_global_ui is not None and payload.get('globalUi') is not expected_global_ui
     missing_sequence = [key for key in sequence_contains if key not in payload.get('sequence', [])]
     if (payload.get('state') != expected_state or boundary_bad or expanded_bad or root_recent_bad or recent_mode_bad or
-            accordion_hidden_bad or accordion_label_bad or scroll_host_bad or missing_sequence or failures):
+            accordion_hidden_bad or accordion_label_bad or scroll_host_bad or scroll_top_bad or global_ui_bad or missing_sequence or failures):
         raise AssertionError(
             f'{name}: state={payload.get("state")} boundary={payload.get("boundary")} expanded={payload.get("expanded")} '
             f'rootRecent={payload.get("rootRecent")} recentMode={payload.get("recentMode")} accordionHidden={payload.get("accordionHidden")} label={payload.get("accordionLabel")!r} '
@@ -305,7 +313,7 @@ const rootClassTimer=setInterval(()=>{
         after_js=root_class_clobber,
         delay=4600,
         boundary='t:conversation-turn-2',
-        expected_recent_mode='collapsed',
+        expected_recent_mode='per-chat',
     )
 
     initially_unfilled_scroll_root = r'''
@@ -323,7 +331,7 @@ document.getElementById('scroll').style.height='1200px';
         before_js=initially_unfilled_scroll_root,
         delay=4600,
         boundary='t:conversation-turn-2',
-        expected_recent_mode='collapsed',
+        expected_recent_mode='per-chat',
         expected_scroll_host_id='scroll',
     )
 
@@ -346,8 +354,7 @@ for (const id of [2,3,4,5]) {
         before_js=short_tail_before,
         delay=4600,
         boundary='t:conversation-turn-2',
-        expected_recent_mode='collapsed',
-        expected_accordion_hidden=False,
+        expected_recent_mode='per-chat',
     )
 
     finalization_invalid = r'''
@@ -355,26 +362,28 @@ const badBoundary=document.querySelector('[data-testid="conversation-turn-2"]');
 const badNativeRect=badBoundary.getBoundingClientRect.bind(badBoundary);
 badBoundary.getBoundingClientRect=()=>{
   const r=badNativeRect();
-  if(document.documentElement.classList.contains('csg-show-recent-only')) {
+  if(document.documentElement.dataset.csgRecentMode==='per-chat') {
     return {top:r.top+5000,bottom:r.bottom+5000,left:r.left,right:r.right,width:r.width,height:r.height};
   }
   return r;
 };
 '''
     run_case(
-        'finalization-fail-open-is-not-overwritten-by-ready',
-        '/c/finalization-fail-open/',
+        'per-chat-coordinate-noise-does-not-degrade',
+        '/c/per-chat-coordinate-noise/',
         base,
         [
-            {'name':'old-user-fails-open-visible','selector':'[data-testid="conversation-turn-0"]','hidden':False},
+            {'name':'old-user-stays-folded','selector':'[data-testid="conversation-turn-0"]','hidden':True},
             {'name':'boundary-user-visible','selector':'[data-testid="conversation-turn-2"]','hidden':False},
         ],
         n=2,
         before_js=finalization_invalid,
         delay=4600,
-        expected_state='degraded',
+        boundary='t:conversation-turn-2',
+        expected_state='ready',
         expected_expanded=False,
-        expected_recent_mode='',
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
     )
 
     recent_ui_clobber = r'''
@@ -382,24 +391,23 @@ const recentUiTimer=setInterval(()=>{
   if(document.documentElement.dataset.csgRecentState!=='ready') return;
   clearInterval(recentUiTimer);
   delete document.documentElement.dataset.csgRecentMode;
-  document.getElementById('csg-recent-accordion')?.remove();
+  document.querySelectorAll('.csg-chat-toggle').forEach((button)=>button.remove());
 },100);
 '''
     run_case(
-        'ready-mode-and-accordion-self-heal-after-host-clobber',
+        'ready-mode-and-chat-toggles-self-heal-after-host-clobber',
         '/c/recent-ui-clobber/',
         base,
         [
             {'name':'old-user-remains-hidden','selector':'[data-testid="conversation-turn-0"]','hidden':True},
+            {'name':'old-toggle-is-restored','selector':'[data-testid="conversation-turn-0"] > .csg-chat-toggle','hidden':False},
             {'name':'boundary-user-remains-visible','selector':'[data-testid="conversation-turn-2"]','hidden':False},
         ],
         n=2,
         after_js=recent_ui_clobber,
         delay=5000,
         boundary='t:conversation-turn-2',
-        expected_recent_mode='collapsed',
-        expected_accordion_hidden=False,
-        accordion_label_contains='Show 1 earlier exchange',
+        expected_recent_mode='per-chat',
     )
 
     dynamic_body = (
@@ -464,7 +472,7 @@ setTimeout(()=>{
         turn(5,'user'), turn(6,'assistant'),
     ])
     run_case(
-        'assistant-only-known-history-still-offers-accordion',
+        'assistant-only-known-history-still-folds-per-chat',
         '/c/assistant-only-history/',
         assistant_only_history,
         [
@@ -475,9 +483,7 @@ setTimeout(()=>{
         n=2,
         delay=4600,
         boundary='t:conversation-turn-3',
-        expected_recent_mode='collapsed',
-        expected_accordion_hidden=False,
-        accordion_label_contains='Show earlier exchanges',
+        expected_recent_mode='per-chat',
     )
 
     identity_body = ''.join([
@@ -543,106 +549,148 @@ const mixedTimer=setInterval(()=>{
         turn(4,'user'), turn(5,'assistant'),
         turn(6,'user'), turn(7,'assistant'),
     ])
-    expand_after = r'''
-const accordionExpand=setInterval(()=>{
+    expand_one_after = r'''
+const expandOne=setInterval(()=>{
   if(document.documentElement.dataset.csgRecentState!=='ready') return;
-  const button=document.getElementById('csg-recent-accordion');
+  const button=document.querySelector('[data-testid=conversation-turn-0] > .csg-chat-toggle');
   if(!button) return;
-  clearInterval(accordionExpand);
+  clearInterval(expandOne);
   button.click();
 },100);
 '''
     run_case(
-        'accordion-expand-reveals-history',
-        '/c/accordion-expand/',
+        'per-chat-expand-reveals-only-selected-history',
+        '/c/per-chat-expand/',
         accordion_body,
         [
-            {'name':'old-user-visible','selector':'[data-testid="conversation-turn-0"]','hidden':False},
-            {'name':'old-assistant-visible','selector':'[data-testid="conversation-turn-1"]','hidden':False},
-            {'name':'boundary-user-visible','selector':'[data-testid="conversation-turn-4"]','hidden':False},
+            {'name':'selected-old-user-visible','selector':'[data-testid=\"conversation-turn-0\"]','hidden':False},
+            {'name':'selected-old-assistant-visible','selector':'[data-testid=\"conversation-turn-1\"]','hidden':False},
+            {'name':'other-old-user-stays-folded','selector':'[data-testid=\"conversation-turn-2\"]','hidden':True},
+            {'name':'other-old-assistant-stays-folded','selector':'[data-testid=\"conversation-turn-3\"]','hidden':True},
+            {'name':'expanded-arrow-is-caret','selector':'[data-testid=\"conversation-turn-0\"] > .csg-chat-toggle[data-expanded=\"true\"]','hidden':False},
         ],
         n=2,
-        after_js=expand_after,
+        after_js=expand_one_after,
         delay=4600,
         boundary='t:conversation-turn-4',
-        expected_expanded=True,
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
     )
 
-    collapse_after = r'''
-const accordionCollapse=setInterval(()=>{
+    collapse_recent_after = r'''
+const collapseRecent=setInterval(()=>{
   if(document.documentElement.dataset.csgRecentState!=='ready') return;
-  const button=document.getElementById('csg-recent-accordion');
+  const button=document.querySelector('[data-testid=conversation-turn-4] > .csg-chat-toggle');
   if(!button) return;
-  clearInterval(accordionCollapse);
+  clearInterval(collapseRecent);
   button.click();
-  setTimeout(()=>{
-    document.getElementById('scroll').scrollTop=0;
-    button.click();
-  },250);
 },100);
 '''
     run_case(
-        'accordion-collapse-restores-recent-boundary',
-        '/c/accordion-collapse/',
+        'per-chat-recent-exchange-can-collapse-independently',
+        '/c/per-chat-collapse/',
         accordion_body,
         [
-            {'name':'old-user-hidden-again','selector':'[data-testid="conversation-turn-0"]','hidden':True},
-            {'name':'old-assistant-hidden-again','selector':'[data-testid="conversation-turn-1"]','hidden':True},
-            {'name':'boundary-user-visible','selector':'[data-testid="conversation-turn-4"]','hidden':False},
+            {'name':'boundary-user-folded','selector':'[data-testid=\"conversation-turn-4\"]','hidden':True},
+            {'name':'boundary-assistant-folded','selector':'[data-testid=\"conversation-turn-5\"]','hidden':True},
+            {'name':'latest-user-visible','selector':'[data-testid=\"conversation-turn-6\"]','hidden':False},
+            {'name':'latest-assistant-visible','selector':'[data-testid=\"conversation-turn-7\"]','hidden':False},
+            {'name':'collapsed-arrow-is-chevron','selector':'[data-testid=\"conversation-turn-4\"] > .csg-chat-toggle[data-expanded=\"false\"]','hidden':False},
         ],
         n=2,
-        after_js=collapse_after,
-        delay=5200,
+        after_js=collapse_recent_after,
+        delay=4600,
         boundary='t:conversation-turn-4',
-        expected_expanded=False,
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
     )
 
-    virtualized_collapse_after = r'''
-const virtualizedCollapse=setInterval(()=>{
+    no_scan_before = r'''
+const scrollProbe=document.getElementById('scroll');
+const scrollTopDescriptor=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+window.__csgScrollWrites=0;
+Object.defineProperty(scrollProbe,'scrollTop',{
+  configurable:true,
+  get(){ return scrollTopDescriptor.get.call(this); },
+  set(value){ window.__csgScrollWrites+=1; return scrollTopDescriptor.set.call(this,value); }
+});
+'''
+    no_scan_after = r'''
+const noScan=setInterval(()=>{
   if(document.documentElement.dataset.csgRecentState!=='ready') return;
-  const button=document.getElementById('csg-recent-accordion');
-  if(!button) return;
-  clearInterval(virtualizedCollapse);
-  button.click();
-  setTimeout(()=>{
-    const scroll=document.getElementById('scroll');
-    const thread=document.getElementById('thread');
-    thread.innerHTML='<section class="turn" data-testid="conversation-turn-0" data-turn="user">user-0</section>'+
-      '<section class="turn" data-testid="conversation-turn-1" data-turn="assistant"><div class="markdown">assistant-1</div></section>'+
-      '<div style="height:1200px"></div>';
-    scroll.scrollTop=0;
-    let restored=false;
-    const remountTimer=setInterval(()=>{
-      if(restored || scroll.scrollTop<700) return;
-      restored=true;
-      clearInterval(remountTimer);
-      thread.innerHTML='<section class="turn" data-testid="conversation-turn-0" data-turn="user">user-0</section>'+
-        '<section class="turn" data-testid="conversation-turn-1" data-turn="assistant"><div class="markdown">assistant-1</div></section>'+
-        '<section class="turn" data-testid="conversation-turn-2" data-turn="user">user-2</section>'+
-        '<section class="turn" data-testid="conversation-turn-3" data-turn="assistant"><div class="markdown">assistant-3</div></section>'+
-        '<section class="turn" data-testid="conversation-turn-4" data-turn="user">user-4</section>'+
-        '<section class="turn" data-testid="conversation-turn-5" data-turn="assistant"><div class="markdown">assistant-5</div></section>'+
-        '<section class="turn" data-testid="conversation-turn-6" data-turn="user">user-6</section>'+
-        '<section class="turn" data-testid="conversation-turn-7" data-turn="assistant"><div class="markdown">assistant-7</div></section>';
-    },20);
-    setTimeout(()=>button.click(),260);
-  },180);
+  clearInterval(noScan);
+  if(window.__csgScrollWrites===0) document.getElementById('scroll').dataset.csgNoAutoScan='1';
 },100);
 '''
     run_case(
-        'accordion-collapse-recovers-virtualized-boundary-from-tail',
-        '/c/accordion-virtualized-collapse/',
+        'per-chat-initialization-never-writes-scrolltop',
+        '/c/per-chat-no-auto-scan/',
         accordion_body,
         [
-            {'name':'old-user-hidden-after-remount','selector':'[data-testid="conversation-turn-0"]','hidden':True},
-            {'name':'old-assistant-hidden-after-remount','selector':'[data-testid="conversation-turn-1"]','hidden':True},
-            {'name':'boundary-user-visible-after-remount','selector':'[data-testid="conversation-turn-4"]','hidden':False},
+            {'name':'no-programmatic-scroll-during-init','selector':'#scroll[data-csg-no-auto-scan="1"]','hidden':False},
+            {'name':'old-user-folded','selector':'[data-testid="conversation-turn-0"]','hidden':True},
         ],
         n=2,
-        after_js=virtualized_collapse_after,
-        delay=6200,
+        before_js=no_scan_before,
+        after_js=no_scan_after,
+        delay=4600,
         boundary='t:conversation-turn-4',
-        expected_expanded=False,
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
+    )
+
+    native_scroll_after = r'''
+const nativeScroll=setInterval(()=>{
+  if(document.documentElement.dataset.csgRecentState!=='ready') return;
+  clearInterval(nativeScroll);
+  document.getElementById('scroll').scrollTop=0;
+},100);
+'''
+    run_case(
+        'per-chat-mode-never-clamps-native-scroll',
+        '/c/per-chat-native-scroll/',
+        accordion_body,
+        [
+            {'name':'old-user-folded','selector':'[data-testid=\"conversation-turn-0\"]','hidden':True},
+            {'name':'boundary-user-visible','selector':'[data-testid=\"conversation-turn-4\"]','hidden':False},
+        ],
+        n=2,
+        after_js=native_scroll_after,
+        delay=4600,
+        boundary='t:conversation-turn-4',
+        expected_recent_mode='per-chat',
+        expected_scroll_top=0,
+        expected_global_ui=False,
+    )
+
+    recycled_turn_after = r'''
+const recycleTurn=setInterval(()=>{
+  if(document.documentElement.dataset.csgRecentState!=='ready') return;
+  const turn=document.querySelector('[data-testid="conversation-turn-0"]');
+  const toggle=turn?.querySelector(':scope > .csg-chat-toggle');
+  if(!turn || !toggle) return;
+  clearInterval(recycleTurn);
+  turn.setAttribute('data-testid','conversation-turn-99');
+  turn.setAttribute('data-turn','assistant');
+  setTimeout(()=>{
+    if(!turn.querySelector(':scope > .csg-chat-toggle')) turn.dataset.reuseClean='1';
+  },500);
+},100);
+'''
+    run_case(
+        'virtualizer-recycled-turn-removes-stale-toggle',
+        '/c/recycled-turn/',
+        accordion_body,
+        [
+            {'name':'recycled-assistant-has-no-stale-toggle','selector':'[data-testid="conversation-turn-99"][data-reuse-clean="1"]','hidden':False},
+            {'name':'latest-user-visible','selector':'[data-testid="conversation-turn-6"]','hidden':False},
+        ],
+        n=2,
+        after_js=recycled_turn_after,
+        delay=5000,
+        boundary='t:conversation-turn-4',
+        expected_recent_mode='per-chat',
+        expected_global_ui=False,
     )
 
     print('RECENT WINDOW TESTS OK')

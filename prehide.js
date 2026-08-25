@@ -22,7 +22,7 @@
     }
 
     function isConversationRoute() {
-      return location.pathname.startsWith('/c/') || location.pathname.startsWith('/share/');
+      return /^\/(?:g\/[^/]+\/)?c\//.test(location.pathname) || location.pathname.startsWith('/share/');
     }
 
     function loadingCopy() {

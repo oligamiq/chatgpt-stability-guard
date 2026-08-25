@@ -94,9 +94,10 @@ def main():
     recent = payload.get('recent') or {}
     assert core.get('contentReady') == '1', core
     assert recent.get('recentState') == 'ready', recent
-    assert recent.get('recentMode') == 'collapsed', recent
-    assert int(recent.get('hiddenOldTurns') or 0) >= 1, recent
-    assert recent.get('accordionExists') is True and recent.get('accordionHidden') is False, recent
+    assert recent.get('recentMode') == 'per-chat', recent
+    assert int(recent.get('hiddenOldTurns') or 0) + int(recent.get('foldedTurns') or 0) >= 1, recent
+    assert int(recent.get('chatToggleCount') or 0) >= 1, recent
+    assert recent.get('globalRecentUi') is False, recent
     print('PASS live-site smoke local fixture')
 
 
