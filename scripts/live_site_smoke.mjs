@@ -33,15 +33,40 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function stopChild(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise(resolve => child.once('exit', resolve)),
+    sleep(700),
+  ]);
+  if (child.exitCode !== null) return;
+  child.kill('SIGKILL');
+  await Promise.race([
+    new Promise(resolve => child.once('exit', resolve)),
+    sleep(700),
+  ]);
+}
+
 class CdpClient {
   constructor(url) {
     this.socket = new WebSocket(url);
     this.nextId = 1;
     this.pending = new Map();
+    this.closedError = null;
+    const failPending = error => {
+      if (this.closedError) return;
+      this.closedError = error;
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+    };
     this.ready = new Promise((resolve, reject) => {
       this.socket.addEventListener('open', resolve, { once: true });
-      this.socket.addEventListener('error', reject, { once: true });
+      this.socket.addEventListener('error', () => reject(new Error('CDP WebSocket connection failed')), { once: true });
+      this.socket.addEventListener('close', () => reject(new Error('CDP WebSocket closed before ready')), { once: true });
     });
+    this.socket.addEventListener('close', () => failPending(new Error('CDP WebSocket closed')));
+    this.socket.addEventListener('error', () => failPending(new Error('CDP WebSocket error')));
     this.socket.addEventListener('message', event => {
       const message = JSON.parse(String(event.data));
       if (!message.id) return;
@@ -55,9 +80,20 @@ class CdpClient {
 
   async send(method, params = {}) {
     await this.ready;
+    if (this.closedError) throw this.closedError;
+    if (this.socket.readyState !== WebSocket.OPEN) throw new Error('CDP WebSocket is not open');
     const id = this.nextId++;
-    const response = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-    this.socket.send(JSON.stringify({ id, method, params }));
+    let rejectResponse;
+    const response = new Promise((resolve, reject) => {
+      rejectResponse = reject;
+      this.pending.set(id, { resolve, reject });
+    });
+    try {
+      this.socket.send(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      this.pending.delete(id);
+      rejectResponse(error);
+    }
     return response;
   }
 
@@ -80,15 +116,29 @@ class CdpClient {
   }
 }
 
+function isTransientNavigationError(error) {
+  const message = String(error?.message || error);
+  return /Execution context was destroyed|Cannot find context with specified id|Inspected target navigated or closed/i.test(message);
+}
+
 async function waitFor(check, timeoutMs, intervalMs = 250) {
   const deadline = Date.now() + timeoutMs;
   let last;
+  let lastTransientError = '';
   while (Date.now() < deadline) {
-    last = await check();
-    if (last) return last;
+    try {
+      last = await check();
+      lastTransientError = '';
+      if (last) return last;
+    } catch (error) {
+      if (!isTransientNavigationError(error)) throw error;
+      last = null;
+      lastTransientError = String(error?.message || error);
+    }
     await sleep(intervalMs);
   }
-  throw new Error(`Timed out waiting for live page state; last=${JSON.stringify(last)}`);
+  const transient = lastTransientError ? `; transient=${lastTransientError}` : '';
+  throw new Error(`Timed out waiting for live page state; last=${JSON.stringify(last)}${transient}`);
 }
 
 async function launchChrome(url) {
@@ -122,7 +172,7 @@ async function launchChrome(url) {
       });
     });
   } catch (error) {
-    child.kill('SIGKILL');
+    await stopChild(child);
     fs.rmSync(profile, { recursive: true, force: true });
     throw error;
   }
@@ -191,17 +241,31 @@ async function injectScript(cdp, source, label) {
 
 async function snapshot(cdp) {
   return cdp.evaluate(`(() => {
+    const root = document.documentElement;
+    if (!root) {
+      return {
+        url: location.href,
+        turnCount: 0,
+        contentReady: '',
+        recentState: '',
+        recentMode: '',
+        hiddenOldTurns: 0,
+        hiddenOldExchanges: 0,
+        accordionExists: false,
+        accordionHidden: null,
+      };
+    }
     const turns = [...document.querySelectorAll(${JSON.stringify(TURN_SELECTOR)})];
     const hidden = turns.filter(turn => turn.classList.contains('csg-hidden-old-turn')).length;
     const accordion = document.getElementById('csg-recent-accordion');
     return {
       url: location.href,
       turnCount: turns.length,
-      contentReady: document.documentElement.dataset.csgContentReady || '',
-      recentState: document.documentElement.dataset.csgRecentState || '',
-      recentMode: document.documentElement.dataset.csgRecentMode || '',
+      contentReady: root.dataset.csgContentReady || '',
+      recentState: root.dataset.csgRecentState || '',
+      recentMode: root.dataset.csgRecentMode || '',
       hiddenOldTurns: hidden,
-      hiddenOldExchanges: Number(document.documentElement.dataset.csgRecentHiddenExchanges || 0),
+      hiddenOldExchanges: Number(root.dataset.csgRecentHiddenExchanges || 0),
       accordionExists: Boolean(accordion),
       accordionHidden: accordion ? Boolean(accordion.hidden) : null,
     };
@@ -276,14 +340,7 @@ async function runSmoke() {
     }
   } finally {
     cdp?.close();
-    if (launched.child.exitCode === null) {
-      launched.child.kill('SIGTERM');
-      await Promise.race([
-        new Promise(resolve => launched.child.once('exit', resolve)),
-        sleep(700),
-      ]);
-    }
-    if (launched.child.exitCode === null) launched.child.kill('SIGKILL');
+    await stopChild(launched.child);
     fs.rmSync(launched.profile, { recursive: true, force: true });
   }
 }
