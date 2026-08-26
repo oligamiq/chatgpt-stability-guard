@@ -184,6 +184,125 @@ setTimeout(()=>{{
 
 
 def main():
+    live_sparse_body = ''.join([
+        turn(1, 'user', 'old request 1'),
+        turn(2, 'assistant', 'old response 1'),
+        turn(3, 'user', 'old request 2'),
+        turn(4, 'assistant', 'old response 2'),
+        turn(5, 'user', 'persistent old request'),
+        turn(7, 'user', 'persistent sparse request'),
+        turn(21, 'user', 'recent request 2'),
+        turn(23, 'user', 'latest request'),
+        turn(24, 'assistant', 'latest response'),
+    ])
+    live_sparse_after = r'''
+const provisionalProbe=setInterval(()=>{
+  const s=window.__csgRecentTestState;
+  if(document.documentElement.dataset.csgRecentState==='ready' && s?.boundaryProvisional===true){
+    document.body.dataset.sawProvisionalReady='1';
+    document.body.dataset.provisionalBoundary=s.boundaryKey||'';
+    clearInterval(provisionalProbe);
+  }
+},25);
+setTimeout(()=>{
+  const anchor=document.querySelector('[data-testid="conversation-turn-23"]');
+  anchor.insertAdjacentHTML('beforebegin',
+    '<section class="turn" data-testid="conversation-turn-22" data-turn="assistant"><div class="markdown">recent response 2</div></section>');
+},700);
+setTimeout(()=>{
+  const anchor=document.querySelector('[data-testid="conversation-turn-21"]');
+  anchor.insertAdjacentHTML('beforebegin',
+    '<section class="turn" data-testid="conversation-turn-19" data-turn="user">recent request 1</section>'+
+    '<section class="turn" data-testid="conversation-turn-20" data-turn="assistant"><div class="markdown">recent response 1</div></section>');
+},1400);
+setTimeout(()=>{
+  const anchor=document.querySelector('[data-testid="conversation-turn-19"]');
+  anchor.insertAdjacentHTML('beforebegin',
+    '<section class="turn" data-testid="conversation-turn-17" data-turn="user">older confirmed request</section>'+
+    '<section class="turn" data-testid="conversation-turn-18" data-turn="assistant"><div class="markdown">older confirmed response</div></section>');
+},2200);
+'''
+    run_case(
+        'share-live-sparse-tail-provisional-then-exact',
+        '/share/live-sparse-tail/',
+        live_sparse_body,
+        [
+            {'name':'provisional-ready-observed','selector':'body[data-saw-provisional-ready="1"]','hidden':False},
+            {'name':'provisional-keeps-latest-three-mounted-users','selector':'body[data-provisional-boundary="t:conversation-turn-7"]','hidden':False},
+            {'name':'old-1-folded','selector':'[data-testid="conversation-turn-1"]','hidden':True},
+            {'name':'exact-boundary-19-visible','selector':'[data-testid="conversation-turn-19"]','hidden':False},
+            {'name':'recent-21-visible','selector':'[data-testid="conversation-turn-21"]','hidden':False},
+            {'name':'latest-23-visible','selector':'[data-testid="conversation-turn-23"]','hidden':False},
+            {'name':'latest-24-visible','selector':'[data-testid="conversation-turn-24"]','hidden':False},
+        ],
+        n=3,
+        after_js=live_sparse_after,
+        delay=5200,
+        boundary='t:conversation-turn-19',
+    )
+
+    history_start_body = ''.join([
+        turn(4, 'user', 'recent request 2'),
+        turn(5, 'assistant', 'recent response 2'),
+        turn(6, 'user', 'latest request'),
+        turn(7, 'assistant', 'latest response'),
+    ])
+    history_start_after = r'''
+const historyStartProbe=setInterval(()=>{
+  const s=window.__csgRecentTestState;
+  if(document.documentElement.dataset.csgRecentState==='ready' && s?.boundaryProvisional===true){
+    document.body.dataset.sawHistoryStartProvisional='1';
+    clearInterval(historyStartProbe);
+  }
+},25);
+setTimeout(()=>{
+  const anchor=document.querySelector('[data-testid=\"conversation-turn-4\"]');
+  anchor.insertAdjacentHTML('beforebegin',
+    '<section class=\"turn\" data-testid=\"conversation-turn-0\" data-turn=\"user\">first request</section>'+
+    '<section class=\"turn\" data-testid=\"conversation-turn-1\" data-turn=\"assistant\"><div class=\"markdown\">first response</div></section>'+
+    '<section class=\"turn\" data-testid=\"conversation-turn-2\" data-turn=\"user\">second request</section>'+
+    '<section class=\"turn\" data-testid=\"conversation-turn-3\" data-turn=\"assistant\"><div class=\"markdown\">second response</div></section>');
+},700);
+'''
+    run_case(
+        'share-provisional-expands-to-unconfirmed-physical-start',
+        '/share/history-start/',
+        history_start_body,
+        [
+            {'name':'provisional-ready-before-top','selector':'body[data-saw-history-start-provisional=\"1\"]','hidden':False},
+            {'name':'physical-start-visible','selector':'[data-testid=\"conversation-turn-0\"]','hidden':False},
+            {'name':'second-exchange-visible','selector':'[data-testid=\"conversation-turn-2\"]','hidden':False},
+            {'name':'latest-visible','selector':'[data-testid=\"conversation-turn-6\"]','hidden':False},
+        ],
+        n=5,
+        after_js=history_start_after,
+        delay=4200,
+        boundary='t:conversation-turn-0',
+    )
+
+    assistant_fragment_body = ''.join([
+        turn(10, 'assistant', 'rendered assistant-only fragment'),
+        turn(11, 'user', 'mounted user 1'),
+        turn(12, 'user', 'mounted user 2'),
+        turn(13, 'user', 'mounted user 3'),
+        turn(14, 'assistant', 'response before latest'),
+        turn(15, 'user', 'latest user'),
+        turn(16, 'assistant', 'latest response'),
+    ])
+    run_case(
+        'share-provisional-never-hides-exact-assistant-fragment',
+        '/share/assistant-fragment-provisional/',
+        assistant_fragment_body,
+        [
+            {'name':'assistant-fragment-visible','selector':'[data-testid=\"conversation-turn-10\"]','hidden':False},
+            {'name':'mounted-user-11-visible','selector':'[data-testid=\"conversation-turn-11\"]','hidden':False},
+            {'name':'latest-user-visible','selector':'[data-testid=\"conversation-turn-15\"]','hidden':False},
+        ],
+        n=4,
+        delay=3600,
+        boundary='t:conversation-turn-10',
+    )
+
     sparse_body = ''.join([
         turn(3, 'user', 'persistent image turn'),
         '<div class="gap"></div>',

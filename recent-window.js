@@ -40,6 +40,7 @@
     identityEvidence: new Map(),
     missingEvidence: new Map(),
     boundaryKey: '',
+    boundaryProvisional: false,
     suspended: false,
     pendingBoundaryKey: '',
     hiddenExchangeCount: 0,
@@ -464,7 +465,8 @@
     if (boundaryRemoved) {
       state.ready = false;
       state.boundaryKey = '';
-        state.pendingBoundaryKey = '';
+      state.boundaryProvisional = false;
+      state.pendingBoundaryKey = '';
       delete ROOT.dataset.csgRecentMode;
       ROOT.classList.remove('csg-show-recent-only');
       publishState('waiting');
@@ -885,6 +887,11 @@
       if (!starts.length) return '';
       if (starts.length < state.n) return historyStartKnown() ? starts[0].key : '';
       const boundary = starts[starts.length - state.n];
+      // The first user in a sparse trusted suffix is deliberately unconfirmed:
+      // its preceding assistant/user sections may still be virtualized out. Do
+      // not call that an exact N-boundary unless the physical conversation start
+      // is known. A provisional boundary handles this case without blocking UI.
+      if (!historyStartKnown() && !boundary?.confirmed) return '';
       return boundary?.key || '';
     }
     const starts = userKeys();
@@ -892,6 +899,36 @@
     if (!starts.length) return '';
     if (starts.length < state.n) return historyStartKnown() ? starts[0] : '';
     return starts[starts.length - state.n];
+  }
+
+  function provisionalShareBoundary() {
+    if (!isShareRoute() || historyStartKnown()) return '';
+    const exactStarts = shareExchangeStarts();
+    if (exactStarts.length >= state.n) {
+      const exactCandidate = exactStarts[exactStarts.length - state.n];
+      if (exactCandidate?.confirmed) return '';
+    }
+
+    // The share virtualizer may mount a sparse mix of persistent old turns and
+    // recent turns. The contiguous trusted suffix can then contain only one
+    // user (for example a `Continue` turn), which is too aggressive to use as a
+    // provisional N-window. Keep the latest N mounted user starts, but never
+    // choose a boundary newer than a semantic start already proven by the share
+    // parser (including a rendered assistant-only fragment). Choosing the older
+    // of those candidates can temporarily reveal extra context; it cannot hide
+    // context that the parser has already established as part of the recent tail.
+    const mountedUsers = currentWindow()
+      .filter((item) => item.role === 'user')
+      .map((item) => item.key);
+    const mountedCandidate = mountedUsers[Math.max(0, mountedUsers.length - state.n)] || '';
+    const exactCandidate = exactStarts[0]?.key || '';
+    if (!mountedCandidate) return exactCandidate;
+    if (!exactCandidate) return mountedCandidate;
+    const mountedPosition = keyPosition(mountedCandidate);
+    const exactPosition = keyPosition(exactCandidate);
+    if (mountedPosition < 0) return exactCandidate;
+    if (exactPosition < 0) return mountedCandidate;
+    return mountedPosition <= exactPosition ? mountedCandidate : exactCandidate;
   }
 
   function buildSequenceContext() {
@@ -1181,9 +1218,10 @@
     return null;
   }
 
-  function adoptBoundary(key, _allowBackward = false) {
+  function adoptBoundary(key, _allowBackward = false, provisional = false) {
     if (!key || keyPosition(key) < 0) return false;
     state.boundaryKey = key;
+    state.boundaryProvisional = Boolean(provisional);
     state.pendingBoundaryKey = '';
     updateMinimum();
     return true;
@@ -1230,6 +1268,7 @@
     state.ready = false;
     state.recovering = false;
     state.suspended = true;
+    state.boundaryProvisional = false;
     state.exchangeOverrides.clear();
     clearMountedMarks();
     delete ROOT.dataset.csgRecentMode;
@@ -1310,6 +1349,11 @@
       }
 
       state.boundaryKey = computeBoundary();
+      state.boundaryProvisional = false;
+      if (!state.boundaryKey) {
+        state.boundaryKey = provisionalShareBoundary();
+        state.boundaryProvisional = Boolean(state.boundaryKey);
+      }
       if (!state.boundaryKey) {
         publishState('preparing');
         updateLoadingIndicator('history');
@@ -1324,6 +1368,7 @@
       const boundaryTurn = findMountedByKey(state.boundaryKey);
       if (!(boundaryTurn instanceof Element) || !validateBoundaryKey(state.boundaryKey)) {
         state.boundaryKey = '';
+        state.boundaryProvisional = false;
         publishState('preparing');
         updateLoadingIndicator('history');
         const retryEpoch = epoch;
@@ -1377,9 +1422,14 @@
   function confirmedShareBoundary() {
     if (!isShareRoute()) return '';
     const starts = shareExchangeStarts();
-    if (starts.length < state.n) return '';
+    if (!starts.length) return '';
+    if (starts.length < state.n) return historyStartKnown() ? starts[0].key : '';
     const boundary = starts[Math.max(0, starts.length - state.n)];
-    return boundary?.confirmed ? boundary.key : '';
+    // At the physical conversation start the first user is exact even though
+    // shareExchangeStarts() intentionally marks a suffix-leading user as
+    // unconfirmed. Mirror computeBoundary() so a provisional boundary can move
+    // backward to that exact start instead of remaining permanently too narrow.
+    return boundary?.confirmed || historyStartKnown() ? (boundary?.key || '') : '';
   }
 
   function isStableUserKey(key) {
@@ -1470,6 +1520,16 @@
     return adoptBoundary(candidate, true);
   }
 
+  function tryExpandProvisionalShareBoundary(candidate) {
+    if (!state.boundaryProvisional || !isShareRoute() || !boundaryMovesBackward(candidate)) return false;
+    const mounted = findMountedByKey(candidate);
+    if (!mounted || !validateBoundaryKey(candidate)) return false;
+    // Moving a provisional boundary backward only reveals additional recent
+    // context. Keep it provisional until computeBoundary() can prove the full
+    // N-exchange boundary (or the beginning of the conversation) exactly.
+    return adoptBoundary(candidate, true, true);
+  }
+
   function refreshStructure() {
     if (!state.active) return;
     if (location.pathname !== state.route) {
@@ -1503,8 +1563,17 @@
 
     if (state.pendingBoundaryKey) tryAdvanceBoundary(state.pendingBoundaryKey);
     const candidate = computeBoundary();
-    if (candidate && candidate !== state.boundaryKey) {
-      if (!tryAdvanceBoundary(candidate) && !tryExpandPrivateBoundary(candidate)) tryExpandShareBoundary(candidate);
+    if (candidate) {
+      if (candidate === state.boundaryKey) {
+        state.boundaryProvisional = false;
+      } else if (!tryAdvanceBoundary(candidate) && !tryExpandPrivateBoundary(candidate)) {
+        tryExpandShareBoundary(candidate);
+      }
+    } else if (state.boundaryProvisional) {
+      const provisionalCandidate = provisionalShareBoundary();
+      if (provisionalCandidate && provisionalCandidate !== state.boundaryKey) {
+        tryExpandProvisionalShareBoundary(provisionalCandidate);
+      }
     }
     markMountedTurns();
     updateMinimum();
@@ -1704,6 +1773,7 @@
     state.missingEvidence.clear();
     state.exchangeOverrides.clear();
     state.boundaryKey = '';
+    state.boundaryProvisional = false;
     state.pendingBoundaryKey = '';
     state.hiddenExchangeCount = 0;
     state.hiddenTurnCount = 0;
