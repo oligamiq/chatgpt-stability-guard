@@ -21,11 +21,12 @@ SETTINGS = {
     'autoContinueIncomplete': False, 'showStatus': False,
 }
 PAGE = f'''<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{{margin:0}} #host,#lead-host,#multi-host,#recycle-host,#far-host{{height:300px;overflow:auto}} .turn{{height:500px}}
+html,body{{margin:0}} #host,#lead-host,#multi-host,#recycle-host,#far-host,#dynamic-host{{height:300px;overflow:auto}} .turn{{height:500px}}
 #next-turn{{height:400px}} #tail,#lead-tail,#multi-tail,#recycle-tail,#far-tail{{height:800px}} #lead-next{{height:200px}}
-#multi-prev{{height:400px}} #multi-next{{height:250px}} #recycle-next,#far-next{{height:200px}} #far-filler{{height:2000px}}
+#multi-prev{{height:400px}} #multi-next{{height:250px}} #recycle-next,#far-next{{height:200px}} #dynamic-next{{height:200px}} #far-filler{{height:2000px}}
 {CONTENT_CSS}
 </style></head><body>
+<aside id="stray"><section data-testid="conversation-turn-900">stray turn outside thread</section></aside>
 <div id="host" class="group/scroll-root"><div id="stack">
   <div id="prev-wrap"><section id="prev-turn" class="turn" data-testid="conversation-turn-2">prev</section></div>
   <div id="spacer" class="h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14"
@@ -55,6 +56,11 @@ html,body{{margin:0}} #host,#lead-host,#multi-host,#recycle-host,#far-host{{heig
   <div id="far-spacer" class="h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14" style="--last-known-height:96px;--estimated-turn-height:96px;height:var(--last-known-height)"></div>
   <section id="far-next" data-testid="conversation-turn-61">far next</section><div id="far-tail"></div>
 </div></div>
+<div id="dynamic-host" class="group/scroll-root"><div id="dynamic-stack">
+  <div id="dynamic-node" style="height:0"></div>
+  <section id="dynamic-next" data-testid="conversation-turn-71">dynamic next</section>
+  <div style="height:800px"></div>
+</div></div>
 <script>
 const SETTINGS={json.dumps(SETTINGS)};
 globalThis.chrome={{runtime:{{onMessage:{{addListener(){{}}}}}},storage:{{local:{{remove(){{}},get(def,cb){{if(Object.prototype.hasOwnProperty.call(def,'uiLanguage'))cb({{uiLanguage:'en'}});else cb({{settings:SETTINGS}});}}}}}}}};
@@ -62,11 +68,13 @@ const host=document.getElementById('host'), next=document.getElementById('next-t
 const leadHost=document.getElementById('lead-host'), leadNext=document.getElementById('lead-next');
 const multiHost=document.getElementById('multi-host'), multiNext=document.getElementById('multi-next');
 const farHost=document.getElementById('far-host'), farNext=document.getElementById('far-next');
+const dynamicNext=document.getElementById('dynamic-next');
 host.scrollTop=400; multiHost.scrollTop=300; farHost.scrollTop=0;
 window.initial={{nextTop:next.getBoundingClientRect().top,scrollTop:host.scrollTop,
   leadHostTop:leadHost.getBoundingClientRect().top,leadNextTop:leadNext.getBoundingClientRect().top,
   multiNextTop:multiNext.getBoundingClientRect().top,multiScrollTop:multiHost.scrollTop,
-  farNextTop:farNext.getBoundingClientRect().top,reuseNextTop:document.getElementById('recycle-next').getBoundingClientRect().top}};
+  farNextTop:farNext.getBoundingClientRect().top,reuseNextTop:document.getElementById('recycle-next').getBoundingClientRect().top,
+  dynamicNextTop:dynamicNext.getBoundingClientRect().top}};
 {CONTENT_JS}
 function near(a,b,t=2){{return Math.abs(a-b)<=t}}
 function rect(id){{const r=document.getElementById(id).getBoundingClientRect();return{{top:r.top,bottom:r.bottom,height:r.height}}}}
@@ -85,6 +93,44 @@ async function run(){{
   const multi={{bothClassed:ma.classList.contains('csg-virtual-spacer-overlap')&&mb.classList.contains('csg-virtual-spacer-overlap'),geometryKept:near(mar.height,60)&&near(mbr.height,80),noFlowGap:near(mpr.bottom,mnr.top),anchorStable:near(mnr.top,window.initial.multiNextTop),marginsCancel:near(parseFloat(getComputedStyle(ma).marginBottom),-60)&&near(parseFloat(getComputedStyle(mb).marginBottom),-80)}};
   const recycled=document.getElementById('real-estimate'), rer=rect('real-estimate');
   const recycledRealTurn={{notCompacted:!recycled.classList.contains('csg-virtual-spacer-overlap'),geometryIntact:near(rer.height,88),marginUntouched:near(parseFloat(getComputedStyle(recycled).marginBottom)||0,0)}};
+
+  // Let every initialization rAF/timer drain first. From this point the only
+  // event is React-style same-node class/style recycling into a virtual spacer.
+  await frames(12);
+  const nativeQsa=document.querySelectorAll.bind(document);let spacerReconcileQueries=0;
+  document.querySelectorAll=(selector)=>{{if(selector==='[class*=\"--last-known-height\"][class*=\"--estimated-turn-height\"]')spacerReconcileQueries+=1;return nativeQsa(selector)}};
+  const unrelated=document.getElementById('prev-wrap');
+  for(let i=0;i<200;i++)unrelated.className=`unrelated-${{i}}`;
+  await frames(4);
+  const unrelatedClassChurnIgnored=spacerReconcileQueries===0;
+  const dynamic=document.getElementById('dynamic-node'),dynamicBefore=rect('dynamic-next').top;
+  dynamic.className='h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14';
+  dynamic.style.cssText='--last-known-height:110px;--estimated-turn-height:110px;height:var(--last-known-height)';
+  const dynamicReady=await waitFor(()=>dynamic.classList.contains('csg-virtual-spacer-overlap'),20);
+  const dyr=rect('dynamic-node'),dynr=rect('dynamic-next');
+  const sameNodeBecomesSpacer={{unrelatedClassChurnIgnored,nestedBelowBody:dynamic.parentElement!==document.body,compactedAfterClassMutation:dynamicReady,geometryKept:near(dyr.height,110),noVisibleBlank:near(dynr.top,dynamicBefore,3),marginCancels:near(parseFloat(getComputedStyle(dynamic).marginBottom),-110),boundedReconcile:spacerReconcileQueries<=2}};
+
+  // A newly inserted empty sibling must be added to the bounded attribute target
+  // set before React later recycles that same node into a spacer by class change.
+  const dynamicStack=document.getElementById('dynamic-stack'),late=document.createElement('div');
+  late.id='dynamic-late';dynamicStack.insertBefore(late,dynamicNext);await frames(3);
+  const lateBefore=rect('dynamic-next').top;
+  late.className='h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14';
+  late.style.cssText='--last-known-height:90px;--estimated-turn-height:90px;height:var(--last-known-height)';
+  const lateReady=await waitFor(()=>late.classList.contains('csg-virtual-spacer-overlap'),20);
+  const lateInsertedThenRecycled={{compactedAfterTopologyRefresh:lateReady,noVisibleBlank:near(rect('dynamic-next').top,lateBefore,3),marginCancels:near(parseFloat(getComputedStyle(late).marginBottom),-90)}};
+
+  // A wholly new virtualizer lane can appear while the global LCA stays body.
+  // The newly registered turn must refresh attribute targets even when
+  // bindMainObserverRoot() itself returns early for the unchanged LCA.
+  const newLane=document.createElement('div');newLane.id='new-lane';
+  newLane.innerHTML='<div id="new-lane-spacer" style="height:0"></div><section id="new-lane-turn" data-testid="conversation-turn-999" style="height:160px">new lane turn</section>';
+  document.body.insertBefore(newLane,document.getElementById('host'));await frames(4);
+  const newLaneSpacer=document.getElementById('new-lane-spacer'),newLaneBefore=rect('new-lane-turn').top;
+  newLaneSpacer.className='h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14';
+  newLaneSpacer.style.cssText='--last-known-height:70px;--estimated-turn-height:70px;height:var(--last-known-height)';
+  const newLaneReady=await waitFor(()=>newLaneSpacer.classList.contains('csg-virtual-spacer-overlap'),20);
+  const entirelyNewLane={{compactedAfterTurnRegistration:newLaneReady,noVisibleBlank:near(rect('new-lane-turn').top,newLaneBefore,3),marginCancels:near(parseFloat(getComputedStyle(newLaneSpacer).marginBottom),-70)}};
 
   const farSpacer=document.getElementById('far-spacer');
   const farInitiallyUntracked=!farSpacer.classList.contains('csg-virtual-spacer-overlap');
@@ -115,7 +161,7 @@ async function run(){{
   const lrr=rect('lead-real-turn'),lnr2=rect('lead-next');
   const leadingMaterialized={{anchorStable:near(lnr2.top,leadBefore,3),realAboveAnchor:near(lrr.bottom,lnr2.top),realVisible:near(lrr.height,74),scrollCompensated:near(leadHost.scrollTop,74,3)}};
 
-  const payload={{compact,leading,multi,recycledRealTurn,farScrolledIntoView,sameNodeReuse,materialized,leadingMaterialized,multiMaterialized}};
+  const payload={{compact,leading,multi,recycledRealTurn,farScrolledIntoView,sameNodeBecomesSpacer,lateInsertedThenRecycled,entirelyNewLane,sameNodeReuse,materialized,leadingMaterialized,multiMaterialized}};
   const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify(payload);document.body.appendChild(out);
 }}
 run().catch(error=>{{const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{runtime:{{ok:false}}}});document.body.appendChild(out)}});

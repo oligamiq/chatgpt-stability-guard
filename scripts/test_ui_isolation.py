@@ -442,6 +442,9 @@ function summaryGone(id) {{
     const shell=el.closest('[class~="group/tool-message"]');
     if (shell?.classList.contains('csg-tool-ui')) {{
       const ss=getComputedStyle(shell), sr=shell.getBoundingClientRect();
+      if (state.classes.includes('csg-tool-summary-live')) {{
+        return state.display!=='none' && state.opacity==='0' && ss.position==='absolute' && sr.width>0 && sr.height>0;
+      }}
       return state.display!=='none' && state.opacity==='0' && ss.position==='absolute' && sr.width===0 && sr.height===0;
     }}
     return state.display!=='none' && state.opacity==='0' && state.width>0 && state.height>0;
@@ -554,6 +557,12 @@ setTimeout(() => {{
   const motion=snapshot('live-app-motion');
   const trace=snapshot('inside-motion');
   const traceNaturalHeight=naturalBoxHeight('inside-motion');
+  window.__liveGeometry={{
+    enShell:snapshot('real-called-tool-shell'),
+    enRow:snapshot('real-called-tool-row'),
+    jaShell:snapshot('real-called-tool-ja-shell'),
+    jaRow:snapshot('real-called-tool-ja-row')
+  }};
   window.__liveBeforeAge={{
     tool:physicallyRendered('live-tool'),
     traceFlowOptimizationActive:trace.classes.includes('csg-trace-body') &&
@@ -588,13 +597,19 @@ setTimeout(() => {{
     }})(),
     authorizeSummaryRemainsActionable:!document.getElementById('authorize-details').classList.contains('csg-tool-ui') && physicallyRendered('authorize-summary'),
     realCalledToolPreContentAppGeometryPreserved:window.__preContentAppGeometryPreserved===true,
-    realCalledToolLiveSummaryOnlyOffFlow:document.getElementById('real-called-tool-row').classList.contains('csg-tool-summary-live') &&
-      snapshot('real-called-tool-shell').classes.includes('csg-tool-ui') && snapshot('real-called-tool-shell').position==='absolute' &&
-      zeroRect('real-called-tool-shell') && summaryGone('real-called-tool-row'),
+    realCalledToolLiveSummaryOnlyOffFlow:(() => {{
+      const shell=snapshot('real-called-tool-shell');
+      return document.getElementById('real-called-tool-row').classList.contains('csg-tool-summary-live') &&
+        shell.classes.includes('csg-tool-ui') && shell.position==='absolute' && shell.opacity==='0' &&
+        shell.width>100 && shell.height>0 && summaryGone('real-called-tool-row');
+    }})(),
     realCalledToolTextPreserved:document.getElementById('real-called-tool-shell').textContent.includes('Called tool'),
     realCalledToolJaMarked:document.getElementById('real-called-tool-ja-row').classList.contains('csg-tool-summary-live'),
-    realCalledToolJaLiveSummaryOnlyOffFlow:snapshot('real-called-tool-ja-shell').classes.includes('csg-tool-ui') &&
-      snapshot('real-called-tool-ja-shell').position==='absolute' && zeroRect('real-called-tool-ja-shell') && summaryGone('real-called-tool-ja-row'),
+    realCalledToolJaLiveSummaryOnlyOffFlow:(() => {{
+      const shell=snapshot('real-called-tool-ja-shell');
+      return shell.classes.includes('csg-tool-ui') && shell.position==='absolute' && shell.opacity==='0' &&
+        shell.width>100 && shell.height>0 && summaryGone('real-called-tool-ja-row');
+    }})(),
     realCalledToolAppShellVisible:!snapshot('real-called-tool-app-shell').classes.includes('csg-tool-ui') && snapshot('real-called-tool-app-shell').position!=='absolute' && physicallyRendered('real-called-tool-app-shell'),
     realCalledToolAppRowInvisibleAndSized:summaryGone('real-called-tool-app-row'),
     realCalledToolAppLoaderVisible:physicallyRendered('real-called-tool-app-loader'),
@@ -1014,7 +1029,7 @@ setTimeout(() => {{
     insidePreLazy: states['inside-pre'].contentVisibility==='auto',
     allActionHit: Object.values(hit).every(Boolean),
     allActionsClicked: ACTION_IDS.every(id => window.__clicks[id]===1),
-    states, hit, clicks:window.__clicks, liveBeforeAge:window.__liveBeforeAge,
+    states, hit, clicks:window.__clicks, liveBeforeAge:window.__liveBeforeAge, liveGeometry:window.__liveGeometry,
     oneStepProtected:window.__oneStepProtected, agedOut:window.__agedOut,
     attributeReuseLive:window.__attributeReuseLive
   }};
@@ -1039,13 +1054,13 @@ def main():
     if not match:
         raise AssertionError(f'no result\nSTDERR:\n{proc.stderr[-2000:]}\nDOM:\n{proc.stdout[-5000:]}')
     payload = json.loads(html.unescape(match.group(1)))
-    detail_keys = {'states', 'hit', 'clicks', 'liveBeforeAge', 'oneStepProtected', 'agedOut', 'attributeReuseLive'}
+    detail_keys = {'states', 'hit', 'clicks', 'liveBeforeAge', 'liveGeometry', 'oneStepProtected', 'agedOut', 'attributeReuseLive'}
     failures = {k: v for k, v in payload.items() if k not in detail_keys and v is not True}
     if failures:
         raise AssertionError(
             f'UI isolation failures: {failures}\n'
             f'states={json.dumps(payload.get("states"), ensure_ascii=False, indent=2)}\n'
-            f'liveBeforeAge={payload.get("liveBeforeAge")} oneStepProtected={payload.get("oneStepProtected")} agedOut={payload.get("agedOut")}\n'
+            f'liveBeforeAge={payload.get("liveBeforeAge")} liveGeometry={payload.get("liveGeometry")} oneStepProtected={payload.get("oneStepProtected")} agedOut={payload.get("agedOut")}\n'
             f'hit={payload.get("hit")} clicks={payload.get("clicks")}'
         )
     print('PASS ui-isolation: application Connect/Add controls remain interactive')

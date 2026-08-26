@@ -89,6 +89,8 @@
       detachedCleanupTimer: 0,
       virtualSpacers: new Map(),
       virtualSpacerObserver: null,
+      virtualSpacerAttributeObserver: null,
+      virtualSpacerAttributeContainers: new Set(),
       virtualSpacerScheduled: false,
       virtualSpacerFallbackTimer: 0,
       virtualSpacerScrollBound: false,
@@ -535,9 +537,63 @@
       state.virtualSpacerFallbackTimer = setTimeout(runScheduledVirtualSpacerReconcile, 80);
     }
 
+    function virtualSpacerAttributeTopology() {
+      const targets = new Set();
+      const containers = new Set();
+      for (const turn of getTurns()) {
+        let branch = turn;
+        // Follow each mounted turn outward instead of trusting the global LCA.
+        // A stray turn elsewhere can widen mainConversationObserverRoot() to body,
+        // while the real virtualizer lane remains nested beside this turn.
+        for (let depth = 0; depth < 8; depth += 1) {
+          const parent = branch.parentElement;
+          if (!(parent instanceof Element) || parent === document.documentElement || parent === document.body) break;
+          if (parent.children.length <= 96) {
+            containers.add(parent);
+            for (const child of parent.children) targets.add(child);
+          }
+          branch = parent;
+        }
+      }
+      return { targets, containers };
+    }
+
+    function bindVirtualSpacerAttributeTargets() {
+      if (!state.settings.enabled) {
+        state.virtualSpacerAttributeObserver?.disconnect();
+        state.virtualSpacerAttributeContainers.clear();
+        return;
+      }
+      if (!state.virtualSpacerAttributeObserver) {
+        state.virtualSpacerAttributeObserver = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            const target = mutation.target;
+            if (!(target instanceof Element) || state.virtualSpacers.has(target)) continue;
+            // Watch only bounded sibling lanes around mounted turns, never every
+            // descendant class mutation in streaming Markdown/App UI.
+            if (isVirtualTurnSpacer(target)) {
+              scheduleVirtualSpacerReconcile();
+              return;
+            }
+          }
+        });
+      }
+      const topology = virtualSpacerAttributeTopology();
+      state.virtualSpacerAttributeObserver.disconnect();
+      state.virtualSpacerAttributeContainers = topology.containers;
+      for (const target of topology.targets) {
+        state.virtualSpacerAttributeObserver.observe(target, {
+          attributes: true,
+          attributeFilter: ['class']
+        });
+      }
+    }
+
     function bindVirtualSpacerObserver() {
       if (!state.settings.enabled) {
         state.virtualSpacerObserver?.disconnect();
+        state.virtualSpacerAttributeObserver?.disconnect();
+        state.virtualSpacerAttributeContainers.clear();
         for (const [spacer, record] of [...state.virtualSpacers]) releaseVirtualSpacer(spacer, record, true);
         return;
       }
@@ -545,24 +601,33 @@
         state.virtualSpacerObserver = new MutationObserver((mutations) => {
           let relevant = false;
           let removedTracked = false;
+          let attributeTopologyChanged = false;
           for (const mutation of mutations) {
+            if (state.virtualSpacerAttributeContainers.has(mutation.target)) attributeTopologyChanged = true;
             for (const node of mutation.addedNodes) {
               if (!(node instanceof Element)) continue;
+              // Virtual-spacer observation remains active even in summary-only
+              // mode, where the general content observer is intentionally not
+              // bound. Keep the mounted-turn registry/topology current here too
+              // so an entirely new virtualizer lane can become attribute-watched.
+              if ((node.matches(TURN_SELECTOR) || node.querySelector?.(TURN_SELECTOR)) && registerTurnsInNode(node)) {
+                attributeTopologyChanged = true;
+              }
               if (node.matches(VIRTUAL_SPACER_SELECTOR) || node.querySelector?.(VIRTUAL_SPACER_SELECTOR)) {
                 relevant = true;
-                break;
               }
             }
             for (const node of mutation.removedNodes) {
               if (!(node instanceof Element)) continue;
+              if (unregisterTurnsInNode(node)) attributeTopologyChanged = true;
               if (state.virtualSpacers.has(node) || node.matches(`.${VIRTUAL_SPACER_CLASS}`) ||
                   node.querySelector?.(`.${VIRTUAL_SPACER_CLASS}`)) {
                 relevant = true;
                 removedTracked = true;
-                break;
               }
             }
           }
+          if (attributeTopologyChanged) bindVirtualSpacerAttributeTargets();
           // Removal changes flow immediately. Reconcile the whole removed batch
           // inside this MutationObserver microtask so anchor compensation lands
           // before the next paint; rAF remains for discovery/resizing work.
@@ -572,6 +637,7 @@
       }
       state.virtualSpacerObserver.disconnect();
       state.virtualSpacerObserver.observe(mainConversationObserverRoot(), { childList: true, subtree: true });
+      bindVirtualSpacerAttributeTargets();
       if (!state.virtualSpacerScrollBound) {
         state.virtualSpacerScrollBound = true;
         document.addEventListener('wheel', () => noteVirtualSpacerUserIntent(document.scrollingElement), { capture: true, passive: true });
@@ -2189,8 +2255,13 @@
         }
       }
       if (!(marker instanceof Element) || !marker.isConnected || !shell.contains(marker)) return false;
-      if (isProtectedLiveToolTurn(shell, latestTurnIndex)) return false;
+      // Summary-only group/tool-message shells are safe to keep out of flex flow
+      // even while the newest turn is streaming. isPassiveStructuralToolShell()
+      // already fails open as soon as App/bootstrap/action content appears. The
+      // old ordering rejected every protected live shell here, so periodic cleanup
+      // reintroduced one parent flex-gap per tool call about 1.2s into a reply.
       if (shell.matches('[class~="group/tool-message"]')) return isPassiveStructuralToolShell(shell, latestTurnIndex);
+      if (isProtectedLiveToolTurn(shell, latestTurnIndex)) return false;
       if (!isConversationTurnScoped(shell)) return false;
       const label = boundedToolSummaryLabel(marker, 181);
       if (label.length > 180) return false;
@@ -3179,7 +3250,10 @@
       }
 
       if (removed) scheduleDetachedCleanup();
-      if (conversationTurnChanged) bindMainObserverRoot();
+      if (conversationTurnChanged) {
+        bindMainObserverRoot();
+        if (state.virtualSpacerObserver) bindVirtualSpacerAttributeTargets();
+      }
       if (conversationTurnChanged || generationStateChanged) scheduleScan();
       if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
     });

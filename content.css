@@ -63,6 +63,20 @@ html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
   pointer-events: none !important;
 }
 
+/* While a reply is still generating, keep summary-only shells out of flow but
+   measurable. An App that reuses the same React-owned shell can then read a real
+   parent width/auto height during its first layout effect; the next mutation
+   immediately fails open and restores the shell to normal flow. */
+html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui:has(.csg-tool-summary-live) {
+  inline-size: 100% !important;
+  block-size: auto !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: none !important;
+  max-block-size: none !important;
+  overflow: visible !important;
+}
+
 html.csg-hide-tool-summary .csg-tool-summary:not([class~="group/tool-message"]):not(details):not(summary) {
   opacity: 0 !important;
   color: transparent !important;

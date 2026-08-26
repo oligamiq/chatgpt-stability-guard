@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.27 — 2026-08-26
+
+- Fixed reply-time blank gaps when ChatGPT recycles an already-mounted empty node into a virtual-height spacer by class mutation; spacer discovery now follows bounded turn-local sibling lanes even if the conversation LCA widens, refreshes targets for inserted siblings, and independently learns entirely new virtualizer lanes even in summary-only mode.
+- Fixed a second streaming-only gap regression where periodic Tool-summary cleanup restored protected summary-only shells to flex flow after about 1.2 seconds, reintroducing one parent gap per tool call; live summary-only shells now stay invisible and off-flow but measurable for synchronous App bootstrap, while App/action surfaces still fail open.
+
 ## 1.0.26 — 2026-08-26
 
 - Hardened Recent-N semantic window tracking across ChatGPT virtualization, branch edits, regenerate flows, delayed tail remounts, SPA route changes, recycled turn nodes, mixed numeric/opaque identities, and small viewport scroll roots while preserving fail-open behavior for ambiguous history.
