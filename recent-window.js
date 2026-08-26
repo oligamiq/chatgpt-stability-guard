@@ -6,6 +6,12 @@
   const DEFAULTS = { enabled: true, showRecentOnly: false, recentExchanges: 3 };
   const LOADING_WATCHDOG_MS = 60000;
   const INITIAL_SETTLE_MS = 450;
+  function normalizeRecentExchanges(value) {
+    const numeric = Number(value);
+    const normalized = Number.isFinite(numeric) ? numeric : DEFAULTS.recentExchanges;
+    return Math.max(1, Math.min(100, Math.round(normalized)));
+  }
+
   const STOP_GENERATING_SELECTOR = [
     'button[data-testid="stop-button"]',
     'button[data-testid="stop-generating-button"]',
@@ -58,12 +64,16 @@
     lastMergeScrollTop: null,
     lastWindowKeys: [],
     bottomTailEvidence: null,
+    pendingTailAnchorKey: '',
     loadingRemoveTimer: 0,
     loadingWatchdogTimer: 0,
     loadingUiFinished: false,
     initialFinalized: false,
     finalizeTimer: 0,
     finalScrollCorrections: 0,
+    finalScrollDeferredForGeneration: false,
+    finalScrollStartTop: null,
+    finalScrollSuppressed: false,
     uiLanguage: 'auto'
   };
 
@@ -73,7 +83,7 @@
       const merged = { ...DEFAULTS, ...(settings || {}) };
       state.uiLanguage = ['auto', 'ja', 'en'].includes(uiLanguage) ? uiLanguage : 'auto';
       state.active = merged.enabled !== false && merged.showRecentOnly === true;
-      state.n = Math.max(1, Math.min(100, Number(merged.recentExchanges) || 3));
+      state.n = normalizeRecentExchanges(merged.recentExchanges);
       if (!state.active) {
         ROOT.dataset.csgRecentRuntime = '1';
         clearProvisionalFold();
@@ -313,6 +323,11 @@
 
   function bindObserverRoot() {
     if (!state.observer) return;
+    if (!isConversationRoute()) {
+      state.observer.disconnect();
+      state.observerRoot = null;
+      return;
+    }
     const next = conversationObserverRoot();
     if (state.observerRoot === next && next?.isConnected) return;
     state.observer.disconnect();
@@ -429,6 +444,7 @@
     if (!keys?.length) return false;
     const stale = new Set(keys);
     const boundaryRemoved = stale.has(state.boundaryKey);
+    if (stale.has(state.pendingBoundaryKey)) state.pendingBoundaryKey = '';
     state.sequence = state.sequence.filter((key) => !stale.has(key));
     for (const key of stale) {
       state.roles.delete(key);
@@ -483,11 +499,24 @@
   function messageIdentityDiverged(items) {
     if (!state.ready) return false;
     const now = performance.now();
+    const positions = new Map(state.sequence.map((key, index) => [key, index]));
+    const latestStartKey = exchangeStartKeys().at(-1) || '';
+    const latestStartPosition = positions.get(latestStartKey) ?? -1;
+    const trustTailIdentity = latestStartPosition >= 0;
     let pending = false;
     for (const item of items) {
       if (!item.key || !item.messageId) continue;
       const known = state.messageIds.get(item.key);
       if (!known || known === item.messageId) {
+        state.identityEvidence.delete(item.key);
+        continue;
+      }
+      const itemPosition = positions.get(item.key) ?? -1;
+      if (trustTailIdentity && itemPosition >= latestStartPosition) {
+        // Regenerate/edit can keep the turn key while replacing the message id.
+        // At the physical bottom, changes inside the latest exchange are a new
+        // semantic tail, not evidence that the remembered middle branch is stale.
+        state.messageIds.set(item.key, item.messageId);
         state.identityEvidence.delete(item.key);
         continue;
       }
@@ -505,45 +534,13 @@
 
   function reconcileMountedWindow(items) {
     if (!state.sequence.length || items.length < 2) return;
-    const keys = items.map((item) => item.key);
-    const numericItems = items.filter((item) => Number.isInteger(item.index));
-    if (numericItems.length === items.length) {
-      // ChatGPT can keep sparse, old numeric turns mounted outside the active
-      // virtualized window (notably image turns on /share/). A numeric gap in
-      // querySelectorAll() therefore does not prove that remembered turns inside
-      // that [min, max] span were deleted by a branch edit. Numeric keys can be
-      // merged back into semantic order when they reappear, so do not prune them.
-      for (const item of numericItems) state.missingEvidence.delete(item.key);
-      return;
-    }
-
-    // Opaque IDs: when the mounted window has at least two known anchors, the
-    // DOM between those anchors is authoritative for this branch. Replace only
-    // that bounded segment so orphaned edit/branch keys cannot live forever.
-    const anchored = keys
-      .map((key, domIndex) => ({ key, domIndex, seqIndex: state.sequence.indexOf(key) }))
-      .filter((item) => item.seqIndex >= 0 && !Number.isInteger(state.numeric.get(item.key)));
-    if (anchored.length < 2) return;
-    const first = anchored[0];
-    const last = anchored[anchored.length - 1];
-    if (first.seqIndex >= last.seqIndex || first.domIndex >= last.domIndex) return;
-    const original = [...state.sequence];
-    const replacement = keys.slice(first.domIndex, last.domIndex + 1);
-    const stale = original
-      .slice(first.seqIndex, last.seqIndex + 1)
-      .filter((key) => !replacement.includes(key));
-    const before = original.slice(0, first.seqIndex);
-    const after = original.slice(last.seqIndex + 1).filter((key) => !replacement.includes(key));
-    for (const key of replacement) state.missingEvidence.delete(key);
-    const confirmedStale = confirmedMissingKeys(stale);
-    if (!confirmedStale.length && stale.length) return;
-    forgetSequenceKeys(confirmedStale);
-    const confirmedSet = new Set(confirmedStale);
-    state.sequence = [
-      ...before,
-      ...replacement,
-      ...after
-    ].filter((key, index, list) => !confirmedSet.has(key) && list.indexOf(key) === index);
+    // Absence inside a virtualized DOM window is not deletion evidence. ChatGPT
+    // may keep sparse numeric or opaque turns mounted while measuring/remounting
+    // content, so destructive reconciliation must be driven by positive branch
+    // evidence (unknown replacement keys / message identity), not missing nodes.
+    // Clear stale absence samples for keys that are visible again and otherwise
+    // preserve the semantic sequence until a stronger path recovers/replaces it.
+    for (const item of items) state.missingEvidence.delete(item.key);
   }
 
   function mergeWindow(items) {
@@ -588,15 +585,14 @@
           }
         }
         if (!conflict) {
-          // Rebuild from the aligned window to correctly handle multiple prepends.
-          if (offset < 0) {
-            const prefix = keys.slice(0, -offset);
-            state.sequence = [...prefix, ...state.sequence.filter((key) => !prefix.includes(key))];
-          } else {
-            const suffixStart = Math.max(0, state.sequence.length - offset);
-            const suffix = keys.slice(suffixStart).filter((key) => !positions.has(key));
-            state.sequence = [...state.sequence, ...suffix];
-          }
+          // Rebuild both sides of an aligned window. A virtualizer can widen
+          // the mounted range in both directions in one frame, so handling only
+          // the prepend side would silently drop a simultaneously appended turn.
+          const prefix = offset < 0 ? keys.slice(0, -offset) : [];
+          const suffixStart = Math.max(0, state.sequence.length - offset);
+          const suffix = keys.slice(suffixStart).filter((key) => !positions.has(key));
+          const outside = state.sequence.filter((key) => !prefix.includes(key) && !suffix.includes(key));
+          state.sequence = [...prefix, ...outside, ...suffix];
           state.lastMergeScrollTop = currentTop;
           return;
         }
@@ -617,28 +613,32 @@
     // For opaque IDs, first use DOM adjacency inside the current virtualized window.
     // This handles mid-chat edits/replacements even when scrollTop is unchanged.
     const working = [...state.sequence];
+    const workingSet = new Set(working);
     let insertedByAdjacency = 0;
     for (let i = 0; i < keys.length; i += 1) {
       const key = keys[i];
-      if (working.includes(key)) continue;
+      if (workingSet.has(key)) continue;
       let previous = '';
       let next = '';
       for (let j = i - 1; j >= 0; j -= 1) {
-        if (working.includes(keys[j])) { previous = keys[j]; break; }
+        if (workingSet.has(keys[j])) { previous = keys[j]; break; }
       }
       for (let j = i + 1; j < keys.length; j += 1) {
-        if (working.includes(keys[j])) { next = keys[j]; break; }
+        if (workingSet.has(keys[j])) { next = keys[j]; break; }
       }
       const previousIndex = previous ? working.indexOf(previous) : -1;
       const nextIndex = next ? working.indexOf(next) : -1;
       if (previousIndex >= 0 && nextIndex >= 0 && previousIndex < nextIndex) {
         working.splice(nextIndex, 0, key);
+        workingSet.add(key);
         insertedByAdjacency += 1;
       } else if (previousIndex >= 0 && nextIndex < 0) {
         working.splice(previousIndex + 1, 0, key);
+        workingSet.add(key);
         insertedByAdjacency += 1;
       } else if (nextIndex >= 0 && previousIndex < 0) {
         working.splice(nextIndex, 0, key);
+        workingSet.add(key);
         insertedByAdjacency += 1;
       }
     }
@@ -647,11 +647,35 @@
     // With a fully disjoint opaque-ID window, exact adjacency is unknowable.
     // Direction still tells us whether the new window lies before or after the known sequence.
     const knownAfterAdjacency = new Set(state.sequence);
-    const unknown = keys.filter((key) => !knownAfterAdjacency.has(key));
+    let unknown = keys.filter((key) => !knownAfterAdjacency.has(key));
+    if (unknown.length && state.pendingTailAnchorKey) {
+      const anchorSequenceIndex = state.sequence.indexOf(state.pendingTailAnchorKey);
+      const anchorDomIndex = keys.indexOf(state.pendingTailAnchorKey);
+      let tailUnknown = [];
+      if (anchorSequenceIndex >= 0 && anchorDomIndex >= 0) {
+        tailUnknown = keys.slice(anchorDomIndex + 1).filter((key) => !knownAfterAdjacency.has(key));
+      } else if (anchorSequenceIndex === state.sequence.length - 1 && atBottom(48)) {
+        // The regenerated tail can remount after its anchor has itself been
+        // virtualized out. At physical bottom, a pending replacement anchor
+        // still provides semantic ordering independent of scroll direction.
+        tailUnknown = [...unknown];
+      }
+      if (tailUnknown.length) {
+        const tailSet = new Set(tailUnknown);
+        const outside = state.sequence.filter((key) => !tailSet.has(key));
+        const insertAt = outside.indexOf(state.pendingTailAnchorKey) + 1;
+        outside.splice(insertAt, 0, ...tailUnknown);
+        state.sequence = outside;
+        state.pendingTailAnchorKey = '';
+        const consumed = new Set(tailUnknown);
+        unknown = unknown.filter((key) => !consumed.has(key));
+      }
+    }
     if (unknown.length && Number.isFinite(currentTop) && Number.isFinite(state.lastMergeScrollTop)) {
-      if (currentTop < state.lastMergeScrollTop) {
+      const scrollDelta = currentTop - state.lastMergeScrollTop;
+      if (scrollDelta < -2) {
         state.sequence = [...unknown, ...state.sequence];
-      } else if (currentTop > state.lastMergeScrollTop) {
+      } else if (scrollDelta > 2) {
         state.sequence = [...state.sequence, ...unknown];
       } else if (atBottom(24)) {
         // A new opaque-ID turn can appear while the viewport is stationary at
@@ -671,19 +695,71 @@
         if (contiguous) {
           const start = previousPositions[0];
           const end = previousPositions[previousPositions.length - 1] + 1;
-          const outside = new Set([...state.sequence.slice(0, start), ...state.sequence.slice(end)]);
+          const before = state.sequence.slice(0, start);
+          const after = state.sequence.slice(end);
+          const outside = new Set([...before, ...after]);
           const replacement = keys.filter((key) => !outside.has(key));
-          state.sequence = [...state.sequence.slice(0, start), ...replacement, ...state.sequence.slice(end)];
+          const dropped = state.sequence.slice(start, end)
+            .filter((key) => !replacement.includes(key));
+          // Direct branch replacement must not leave role/message/numeric evidence
+          // for keys no longer present in the semantic sequence.
+          forgetSequenceKeys(dropped);
+          state.sequence = [...before, ...replacement, ...after];
         }
       }
     }
     state.lastMergeScrollTop = currentTop;
   }
 
+  function pruneReplacedBottomTail(items) {
+    if (!state.ready || state.initializing || state.recovering || !items.length) return false;
+    const rememberedTail = state.sequence.at(-1) || '';
+    if (!rememberedTail || !state.lastWindowKeys.includes(rememberedTail)) {
+      // A virtualizer can make the current DOM sparse while the user is moving
+      // through history. Only interpret a missing opaque suffix as replacement
+      // when the immediately preceding mounted window actually contained the
+      // remembered semantic tail.
+      return false;
+    }
+    const sequencePositions = new Map(state.sequence.map((key, index) => [key, index]));
+    let anchorDomIndex = -1;
+    let anchorSequenceIndex = -1;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const position = sequencePositions.get(items[i].key) ?? -1;
+      if (position < 0) continue;
+      anchorDomIndex = i;
+      anchorSequenceIndex = position;
+      break;
+    }
+    if (anchorDomIndex < 0) return false;
+    const replacementTail = items.slice(anchorDomIndex + 1);
+    const staleTail = state.sequence.slice(anchorSequenceIndex + 1)
+      .filter((key) => !replacementTail.some((item) => item.key === key));
+    if (!staleTail.length) return false;
+    if (!replacementTail.length) {
+      // A deletion-only frame is indistinguishable from ordinary virtualization,
+      // React suspense, or a transient layout remount. Never destroy remembered
+      // semantic tail state until replacement nodes actually exist. A delayed
+      // regenerate will be handled on the later frame where new opaque keys appear.
+      return false;
+    }
+    // A surviving known anchor followed by entirely-new opaque keys is strong
+    // semantic-tail replacement evidence even if the user is slightly above
+    // the physical bottom. Upward virtualization adds history before anchors,
+    // not an unknown suffix after the last surviving known anchor.
+    if (replacementTail.some((item) =>
+      Number.isInteger(item.index) || sequencePositions.has(item.key))) return false;
+    state.pendingTailAnchorKey = items[anchorDomIndex].key;
+    forgetSequenceKeys(staleTail);
+    state.bottomTailEvidence = null;
+    return true;
+  }
+
   function midSequenceBranchDiverged(items) {
     if (!state.ready || state.initializing || state.recovering || !items.length || !state.sequence.length) return false;
     const keys = items.map((item) => item.key);
-    const positions = keys.map((key) => state.sequence.indexOf(key));
+    const sequencePositions = new Map(state.sequence.map((key, index) => [key, index]));
+    const positions = keys.map((key) => sequencePositions.get(key) ?? -1);
 
     // Strong branch signal: a new/unknown opaque turn follows a known anchor that
     // is not the semantic tail. Numeric turn indexes are excluded individually:
@@ -703,7 +779,7 @@
     // a fully-new window as a branch only when it replaced a previously known
     // window at essentially the same viewport position.
     if (positions.every((position) => position < 0) && state.lastWindowKeys.length &&
-        state.lastWindowKeys.some((key) => state.sequence.includes(key)) &&
+        state.lastWindowKeys.some((key) => sequencePositions.has(key)) &&
         Number.isFinite(state.lastMergeScrollTop) &&
         Math.abs(scrollTop() - state.lastMergeScrollTop) <= 64) {
       return true;
@@ -717,13 +793,18 @@
       return false;
     }
     const keys = items.map((item) => item.key);
-    const positions = keys.map((key) => state.sequence.indexOf(key));
+    const sequencePositions = new Map(state.sequence.map((key, index) => [key, index]));
+    const positions = keys.map((key) => sequencePositions.get(key) ?? -1);
     const known = positions.every((index) => index >= 0);
     // Sparse mounted outliers are harmless when DOM order still follows the
     // remembered sequence and the newest mounted key is the semantic tail.
     const ordered = known && positions.every((index, i) => i === 0 || index > positions[i - 1]);
     const isSuffix = ordered && positions[positions.length - 1] === state.sequence.length - 1;
-    if (isSuffix) {
+    if (ordered) {
+      // A known ordered subset can simply be a sparse virtualized frame. Missing
+      // remembered suffix nodes are not positive evidence of branch regression,
+      // even at physical bottom. Tail replacement is handled when new opaque
+      // replacement keys actually appear.
       state.bottomTailEvidence = null;
       return false;
     }
@@ -734,7 +815,9 @@
       ? { ...previous, count: previous.count + 1, lastAt: now }
       : { signature, count: 1, firstAt: now, lastAt: now };
     state.bottomTailEvidence = evidence;
-    return evidence.count >= 3 && evidence.lastAt - evidence.firstAt >= 160;
+    const confirmed = evidence.count >= 3 && evidence.lastAt - evidence.firstAt >= 160;
+    if (!confirmed) scheduleStructureRefresh();
+    return confirmed;
   }
 
   function userKeys() {
@@ -811,14 +894,27 @@
     return starts[starts.length - state.n];
   }
 
-  function keyPosition(key) {
+  function buildSequenceContext() {
+    const positions = new Map(state.sequence.map((key, index) => [key, index]));
+    const startPositions = exchangeStartKeys()
+      .map((key) => ({ key, position: positions.get(key) ?? -1 }))
+      .filter((item) => item.position >= 0);
+    return {
+      positions,
+      startPositions,
+      boundaryPosition: positions.get(state.boundaryKey) ?? -1
+    };
+  }
+
+  function keyPosition(key, context = null) {
+    if (context?.positions) return context.positions.get(key) ?? -1;
     return state.sequence.indexOf(key);
   }
 
-  function isOldKey(key) {
+  function isOldKey(key, context = null) {
     if (!state.boundaryKey || !key) return false;
-    const boundaryPosition = keyPosition(state.boundaryKey);
-    const position = keyPosition(key);
+    const boundaryPosition = context?.boundaryPosition ?? keyPosition(state.boundaryKey, context);
+    const position = keyPosition(key, context);
     if (boundaryPosition >= 0 && position >= 0) return position < boundaryPosition;
 
     const boundaryNumeric = state.numeric.get(state.boundaryKey);
@@ -827,30 +923,30 @@
     return false;
   }
 
-  function exchangeStartForKey(key) {
-    const position = keyPosition(key);
+  function exchangeStartForKey(key, context = null) {
+    const activeContext = context || buildSequenceContext();
+    const position = keyPosition(key, activeContext);
     if (position < 0) return '';
-    const boundaryPosition = keyPosition(state.boundaryKey);
+    const boundaryPosition = activeContext.boundaryPosition;
     let start = boundaryPosition >= 0 && position >= boundaryPosition ? state.boundaryKey : '';
-    for (const candidate of exchangeStartKeys()) {
-      const candidatePosition = keyPosition(candidate);
-      if (candidatePosition < 0 || candidatePosition > position) continue;
-      if (boundaryPosition >= 0 && position >= boundaryPosition && candidatePosition < boundaryPosition) continue;
-      start = candidate;
+    for (const candidate of activeContext.startPositions) {
+      if (candidate.position > position) break;
+      if (boundaryPosition >= 0 && position >= boundaryPosition && candidate.position < boundaryPosition) continue;
+      start = candidate.key;
     }
-    if (!start && isOldKey(key)) return key;
+    if (!start && isOldKey(key, activeContext)) return key;
     return start;
   }
 
-  function exchangeExpanded(startKey) {
+  function exchangeExpanded(startKey, context = null) {
     if (!startKey) return true;
     if (state.exchangeOverrides.has(startKey)) return state.exchangeOverrides.get(startKey) === true;
-    return !isOldKey(startKey);
+    return !isOldKey(startKey, context);
   }
 
-  function updateExchangeToggle(button, startKey) {
+  function updateExchangeToggle(button, startKey, context = null) {
     if (!(button instanceof HTMLButtonElement)) return;
-    const expanded = exchangeExpanded(startKey);
+    const expanded = exchangeExpanded(startKey, context);
     const glyph = expanded ? '^' : '>';
     const expandedText = String(expanded);
     const label = expanded ? 'Collapse this chat' : 'Expand this chat';
@@ -860,7 +956,7 @@
     if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
   }
 
-  function ensureExchangeToggle(turn, startKey) {
+  function ensureExchangeToggle(turn, startKey, context = null) {
     if (!(turn instanceof Element) || !startKey) return null;
     let button = turn.querySelector(':scope > .csg-chat-toggle');
     if (!button) {
@@ -878,7 +974,7 @@
       turn.prepend(button);
     }
     button.dataset.exchangeKey = startKey;
-    updateExchangeToggle(button, startKey);
+    updateExchangeToggle(button, startKey, context);
     return button;
   }
 
@@ -923,19 +1019,19 @@
     notifyTurnAnalysisVisibility(turn, next);
   }
 
-  function markTurnElement(turn) {
+  function markTurnElement(turn, context) {
     if (!(turn instanceof Element)) return false;
     const key = turnKey(turn);
-    const startKey = exchangeStartForKey(key);
+    const startKey = exchangeStartForKey(key, context);
     if (!startKey || state.ambiguousLateNumeric.has(key)) {
       setTurnAnalysisSuppressed(turn, false);
       turn.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
       turn.querySelector(':scope > .csg-chat-toggle')?.remove();
       return false;
     }
-    const expanded = exchangeExpanded(startKey);
+    const expanded = exchangeExpanded(startKey, context);
     if (key === startKey) {
-      ensureExchangeToggle(turn, startKey);
+      ensureExchangeToggle(turn, startKey, context);
       setTurnAnalysisSuppressed(turn, !expanded);
       turn.classList.remove('csg-hidden-old-turn');
       turn.classList.toggle('csg-chat-collapsed', !expanded);
@@ -949,12 +1045,13 @@
   }
 
   function markMountedTurns() {
+    const context = buildSequenceContext();
     let hidden = 0;
-    for (const item of currentWindow()) if (markTurnElement(item.turn)) hidden += 1;
+    for (const item of currentWindow()) if (markTurnElement(item.turn, context)) hidden += 1;
     state.hiddenTurnCount = hidden;
-    state.historyAvailable = state.hiddenExchangeCount > 0 || keyPosition(state.boundaryKey) > 0;
+    state.historyAvailable = state.hiddenExchangeCount > 0 || keyPosition(state.boundaryKey, context) > 0;
     publishCounts();
-    updateAccordion();
+    updateAccordion(context);
   }
 
   function syncAccordionModeClasses() {
@@ -963,12 +1060,12 @@
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
   }
 
-  function updateAccordion() {
+  function updateAccordion(context = null) {
     if (!state.active) return;
     document.getElementById('csg-recent-accordion')?.remove();
     document.getElementById('csg-recent-scrollbar')?.remove();
     syncAccordionModeClasses();
-    document.querySelectorAll('.csg-chat-toggle').forEach((button) => updateExchangeToggle(button, button.dataset.exchangeKey || ''));
+    document.querySelectorAll('.csg-chat-toggle').forEach((button) => updateExchangeToggle(button, button.dataset.exchangeKey || '', context));
   }
 
   function scrollTop() {
@@ -999,12 +1096,21 @@
   }
 
   function scheduleFinalScrollCorrection() {
-    if (!state.active || !state.ready || state.suspended || state.finalScrollCorrections > 0) return;
+    if (!state.active || !state.ready || state.suspended || state.finalScrollCorrections > 0 || state.finalScrollSuppressed) return;
+    if (document.querySelector(STOP_GENERATING_SELECTOR) && !state.finalScrollDeferredForGeneration) {
+      const turns = getTurns();
+      if (turns.length) {
+        state.scrollHost = findScrollHost(turns[turns.length - 1]);
+        attachScrollHost();
+      }
+      state.finalScrollDeferredForGeneration = true;
+      state.finalScrollStartTop = state.scrollHost ? scrollTop() : null;
+    }
     clearTimeout(state.finalizeTimer);
     const epoch = state.epoch;
     state.finalizeTimer = setTimeout(() => {
       state.finalizeTimer = 0;
-      if (!isCurrentEpoch(epoch) || !state.ready || state.suspended || state.finalScrollCorrections > 0) return;
+      if (!isCurrentEpoch(epoch) || !state.ready || state.suspended || state.finalScrollCorrections > 0 || state.finalScrollSuppressed) return;
       if (document.querySelector(STOP_GENERATING_SELECTOR)) {
         scheduleFinalScrollCorrection();
         return;
@@ -1015,6 +1121,17 @@
       attachScrollHost();
       const host = state.scrollHost;
       if (!host) return;
+      const deferredTop = state.finalScrollStartTop;
+      const userMovedDuringGeneration = state.finalScrollDeferredForGeneration &&
+        Number.isFinite(deferredTop) && Math.abs(scrollTop() - deferredTop) > 2 && !atBottom(48);
+      state.finalScrollDeferredForGeneration = false;
+      state.finalScrollStartTop = null;
+      if (userMovedDuringGeneration) {
+        // Do not yank a user back to the tail after a long generation if they
+        // deliberately moved into history while the correction was deferred.
+        state.finalScrollSuppressed = true;
+        return;
+      }
       host.scrollTop = host.scrollHeight;
       state.finalScrollCorrections += 1;
       ROOT.dataset.csgRecentFinalScrollCorrections = String(state.finalScrollCorrections);
@@ -1025,11 +1142,13 @@
     if (!(turn instanceof Element)) return document.scrollingElement;
     const candidates = [];
     for (let node = turn.parentElement; node && node !== document.body; node = node.parentElement) {
-      if (node.clientHeight <= 200) continue;
+      if (node.clientHeight <= 0) continue;
       const style = getComputedStyle(node);
       const className = String(node.className || '');
-      const ratio = node.scrollHeight / Math.max(1, node.clientHeight);
       const knownRoot = className.includes('csg-recent-scrollhost') || className.includes('group/scroll-root');
+      const minimumCandidateHeight = Math.min(200, Math.max(48, window.innerHeight * 0.2));
+      if (node.clientHeight < minimumCandidateHeight && !knownRoot) continue;
+      const ratio = node.scrollHeight / Math.max(1, node.clientHeight);
       const nativeScrollable = /(auto|scroll|overlay)/.test(style.overflowY);
       const programmaticHidden = style.overflowY === 'hidden';
       const trusted = knownRoot || node.scrollTop > 0 || nativeScrollable || programmaticHidden;
@@ -1077,6 +1196,14 @@
   }
 
   function atBottom(tolerance = 8) {
+    const host = state.scrollHost;
+    if (!host) return false;
+    if (host === document.scrollingElement && scrollHeight() <= viewportHeight() + 2) {
+      // ChatGPT normally scrolls an inner virtualized root. If root discovery
+      // fell back to an unscrollable document, a zero gap is not trustworthy
+      // physical-bottom evidence for destructive tail reconciliation.
+      return false;
+    }
     return scrollHeight() - (scrollTop() + viewportHeight()) <= tolerance;
   }
 
@@ -1109,6 +1236,26 @@
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
     detachScrollHost();
     publishState('degraded');
+  }
+
+  function recoverRecentAfterDivergence() {
+    if (!state.active || !isConversationRoute()) {
+      failOpenRecent();
+      return;
+    }
+    // Branch edits and tail replacements are expected user operations. Reveal
+    // everything immediately, forget the old semantic sequence, then learn the
+    // current branch again instead of disabling Recent-N for the whole session.
+    resetForRoute({ preserveLoadingUi: true, provisional: false });
+    const epoch = state.epoch;
+    state.recovering = true;
+    state.recoveryEpoch = epoch;
+    setTimeout(() => {
+      if (!state.active || state.epoch !== epoch || state.route !== location.pathname) return;
+      state.recovering = false;
+      state.recoveryEpoch = -1;
+      discoverBoundary();
+    }, 120);
   }
 
   async function discoverBoundary() {
@@ -1328,23 +1475,24 @@
     if (location.pathname !== state.route) {
       state.route = location.pathname;
       resetForRoute();
-      discoverBoundary();
+      if (isConversationRoute()) discoverBoundary();
       return;
     }
 
-    if (state.suspended) return;
+    if (!isConversationRoute() || state.suspended) return;
     const mountedWindow = currentWindow();
     if (state.ready && messageIdentityDiverged(mountedWindow)) {
-      failOpenRecent();
+      recoverRecentAfterDivergence();
       return;
     }
+    if (state.ready) pruneReplacedBottomTail(mountedWindow);
     if (state.ready && midSequenceBranchDiverged(mountedWindow)) {
-      failOpenRecent();
+      recoverRecentAfterDivergence();
       return;
     }
     mergeWindow(mountedWindow);
     if (state.ready && state.scrollHost && bottomTailDiverged(mountedWindow)) {
-      failOpenRecent();
+      recoverRecentAfterDivergence();
       return;
     }
     if (!state.ready) {
@@ -1379,6 +1527,16 @@
     }, 300);
   }
 
+  function mutationContainsRoleEvidence(mutation) {
+    if (mutation.target instanceof Element && mutation.target.closest('.markdown')) return false;
+    const selector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"]';
+    for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+      if (!(node instanceof Element)) continue;
+      if (node.matches(selector) || (node.firstElementChild && node.querySelector?.(selector))) return true;
+    }
+    return false;
+  }
+
   function attachObserver() {
     state.observer = new MutationObserver((mutations) => {
       let structureChanged = false;
@@ -1404,7 +1562,10 @@
         const targetTurn = mutation.target instanceof Element ? mutation.target.closest(TURN_SELECTOR) : null;
         if (targetTurn) {
           const key = turnKey(targetTurn);
-          if (!key || !isOldKey(key)) recentContentChanged = true;
+          if (mutationContainsRoleEvidence(mutation)) structureChanged = true;
+          const foldedOld = targetTurn.classList.contains('csg-hidden-old-turn') ||
+            targetTurn.classList.contains('csg-chat-collapsed');
+          if (!key || !foldedOld) recentContentChanged = true;
           if ([...mutation.removedNodes].some((node) =>
             node instanceof Element && node.classList.contains('csg-chat-toggle'))) {
             structureChanged = true;
@@ -1415,16 +1576,18 @@
             structureChanged = true;
           }
         }
-        for (const node of mutation.removedNodes) {
-          if (!(node instanceof Element)) continue;
-          if (unregisterTurnsInNode(node)) structureChanged = true;
-        }
-        for (const node of mutation.addedNodes) {
-          if (!(node instanceof Element)) continue;
-          const addedTurn = node.matches(TURN_SELECTOR);
-          const addedAny = registerTurnsInNode(node);
-          if (addedTurn && state.ready) markTurnElement(node);
-          if (addedAny) structureChanged = true;
+        if (!targetTurn) {
+          for (const node of mutation.removedNodes) {
+            if (!(node instanceof Element)) continue;
+            if (unregisterTurnsInNode(node)) structureChanged = true;
+          }
+          for (const node of mutation.addedNodes) {
+            if (!(node instanceof Element)) continue;
+            const addedTurn = node.matches(TURN_SELECTOR);
+            const addedAny = registerTurnsInNode(node);
+            if (addedTurn && state.ready) markTurnElement(node);
+            if (addedAny) structureChanged = true;
+          }
         }
       }
       if (structureChanged) {
@@ -1473,9 +1636,13 @@
       updateLoadingIndicator('ready');
       removeLoadingIndicator(true);
     } else if (value === 'waiting') {
-      clearTimeout(state.loadingRemoveTimer);
-      state.loadingRemoveTimer = 0;
-      updateLoadingIndicator('waiting');
+      // Once the visual loader has completed, semantic boundary rediscovery must
+      // not cancel its in-flight fade/removal and strand the finished DOM node.
+      if (!state.loadingUiFinished) {
+        clearTimeout(state.loadingRemoveTimer);
+        state.loadingRemoveTimer = 0;
+        updateLoadingIndicator('waiting');
+      }
     } else if (value === 'preparing') {
       updateLoadingIndicator('detecting');
     }
@@ -1490,7 +1657,8 @@
     clearProvisionalFold();
   }
 
-  function resetForRoute() {
+  function resetForRoute({ preserveLoadingUi = false, provisional = true } = {}) {
+    const keepLoadingUiFinished = preserveLoadingUi && state.loadingUiFinished;
     state.epoch += 1;
     clearTimeout(state.scheduled);
     clearTimeout(state.contentTimer);
@@ -1512,9 +1680,12 @@
     clearMountedMarks();
     detachScrollHost();
     state.ready = false;
-    state.loadingUiFinished = false;
+    state.loadingUiFinished = keepLoadingUiFinished;
     state.initialFinalized = false;
     state.finalScrollCorrections = 0;
+    state.finalScrollDeferredForGeneration = false;
+    state.finalScrollStartTop = null;
+    state.finalScrollSuppressed = false;
     delete ROOT.dataset.csgRecentFinalScrollCorrections;
     seedMountedTurns();
     bindObserverRoot();
@@ -1540,12 +1711,24 @@
     state.lastMergeScrollTop = null;
     state.lastWindowKeys = [];
     state.bottomTailEvidence = null;
+    state.pendingTailAnchorKey = '';
     delete ROOT.dataset.csgRecentMode;
     ROOT.classList.remove('csg-show-recent-only', 'csg-recent-accordion-expanded');
-    ROOT.classList.add('csg-prehide-recent-fast');
-    applyProvisionalFold();
-    publishState('preparing');
-    armLoadingWatchdog();
+    if (isConversationRoute()) {
+      if (provisional) {
+        ROOT.classList.add('csg-prehide-recent-fast');
+        applyProvisionalFold();
+      } else {
+        ROOT.classList.remove('csg-prehide-recent-fast');
+      }
+      publishState('preparing');
+      armLoadingWatchdog();
+    } else {
+      ROOT.classList.remove('csg-prehide-recent-fast');
+      state.observer?.disconnect();
+      state.observerRoot = null;
+      publishState('outside');
+    }
   }
 
   function onRouteSignal() {
@@ -1556,12 +1739,7 @@
   }
 
   function start() {
-    seedMountedTurns();
     ROOT.dataset.csgRecentRuntime = '1';
-    ROOT.classList.add('csg-prehide-recent-fast');
-    applyProvisionalFold();
-    publishState('preparing');
-    armLoadingWatchdog();
     attachObserver();
     window.addEventListener('resize', onResize, { passive: true });
     window.addEventListener('popstate', onRouteSignal, true);
@@ -1569,7 +1747,7 @@
     setInterval(() => {
       if (!state.active) return;
       if (location.pathname !== state.route) scheduleStructureRefresh();
-      else {
+      else if (isConversationRoute()) {
         if (!state.observerRoot?.isConnected) {
           seedMountedTurns();
           bindObserverRoot();
@@ -1578,6 +1756,16 @@
         if (state.ready) updateMinimum();
       }
     }, 750);
-    discoverBoundary();
+    if (isConversationRoute()) {
+      seedMountedTurns();
+      bindObserverRoot();
+      ROOT.classList.add('csg-prehide-recent-fast');
+      applyProvisionalFold();
+      publishState('preparing');
+      armLoadingWatchdog();
+      discoverBoundary();
+    } else {
+      publishState('outside');
+    }
   }
 })();

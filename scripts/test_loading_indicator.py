@@ -85,6 +85,17 @@ def test_prehide_early_loader():
 
     group_result = serve_page('/g/example/c/early/', page, 350)
     assert group_result == {'exists': True, 'stage': 'detecting', 'total': '3', 'confirmed': '0'}, group_result
+
+    fractional_page = f'''<!doctype html><html><head>{chrome_stub(2.5)}<script>{PREHIDE_JS}</script></head><body>
+<script>setTimeout(()=>{{const el=document.getElementById('csg-recent-loading');const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{total:el?.dataset.total}});document.body.appendChild(out);}},120);</script>
+</body></html>'''
+    fractional_result = serve_page('/c/fractional-n/', fractional_page, 350)
+    assert fractional_result == {'total': '3'}, fractional_result
+
+    zero_page = f'''<!doctype html><html><head>{chrome_stub(0)}<script>{PREHIDE_JS}</script></head><body>
+<script>setTimeout(()=>{{const el=document.getElementById('csg-recent-loading');const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{total:el?.dataset.total}});document.body.appendChild(out);}},120);</script></body></html>'''
+    zero_result = serve_page('/c/early-zero/', zero_page, 350)
+    assert zero_result == {'total': '1'}, zero_result
     print('PASS prehide-early-recent-loader')
 
 
@@ -128,27 +139,79 @@ def test_prehide_ignores_streaming_inner_mutations():
         '<section data-testid="conversation-turn-2" data-turn="user">u2</section>',
         '<section data-testid="conversation-turn-3" data-turn="assistant">a3</section>',
         '<section data-testid="conversation-turn-4" data-turn="user">u4</section>',
-        '<section id="latest" data-testid="conversation-turn-5" data-turn="assistant">a5</section>',
+        '<section data-testid="conversation-turn-5" data-turn="assistant"><div id="latest" class="markdown">a5</div></section>',
     ])
     probe = '''<script>
-window.__turnQueries=0;
+window.__turnQueries=0; window.__elementTurnQueries=0; window.__roleQueries=0; window.__prehideFoldChecks=0;
 const __qsa=document.querySelectorAll.bind(document);
 document.querySelectorAll=function(selector){
  if(selector==='[data-testid^="conversation-turn-"]') window.__turnQueries+=1;
  return __qsa(selector);
 };
+const __elementQsa=Element.prototype.querySelectorAll;
+Element.prototype.querySelectorAll=function(selector){
+ if(selector==='[data-testid^="conversation-turn-"]') window.__elementTurnQueries+=1;
+ return __elementQsa.call(this,selector);
+};
+const __elementQuery=Element.prototype.querySelector;
+Element.prototype.querySelector=function(selector){
+ if(selector==='[data-message-author-role],[data-turn="user"],[data-turn="assistant"]') window.__roleQueries+=1;
+ return __elementQuery.call(this,selector);
+};
+const __hasAttribute=Element.prototype.hasAttribute;
+Element.prototype.hasAttribute=function(name){
+ if(name==='data-csg-prehide-old-turn') window.__prehideFoldChecks+=1;
+ return __hasAttribute.call(this,name);
+};
 </script>'''
     page = f'''<!doctype html><html><head>{chrome_stub(2)}{probe}<script>{PREHIDE_JS}</script></head><body>{turns}
 <script>setTimeout(()=>{{
  const before=window.__turnQueries;
+ const elementBefore=window.__elementTurnQueries;
+ const foldBefore=window.__prehideFoldChecks;
+ const roleBefore=window.__roleQueries;
  const latest=document.getElementById('latest');
- for(let i=0;i<80;i++){{const span=document.createElement('span');span.textContent='x';latest.appendChild(span);}}
- setTimeout(()=>{{const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{before,after:window.__turnQueries}});document.body.appendChild(out);}},120);
+ for(let i=0;i<80;i++){{const span=document.createElement('span');const inner=document.createElement('i');inner.textContent='x';span.appendChild(inner);latest.appendChild(span);}}
+ setTimeout(()=>{{const out=document.createElement('pre');out.id='csg-test-result';out.textContent=JSON.stringify({{before,after:window.__turnQueries,elementBefore,elementAfter:window.__elementTurnQueries,roleBefore,roleAfter:window.__roleQueries,foldBefore,foldAfter:window.__prehideFoldChecks}});document.body.appendChild(out);}},120);
 }},180);</script></body></html>'''
     result = serve_page('/c/prehide-streaming/', page, 520)
     assert result['after'] == result['before'], result
-    print('PASS prehide-streaming-inner-mutations-do-not-rescan-turns')
+    assert result['elementAfter'] == result['elementBefore'], result
+    assert result['roleAfter'] == result['roleBefore'], result
+    assert result['foldAfter'] == result['foldBefore'], result
+    print('PASS prehide-streaming-inner-mutations-do-not-rescan-or-refold-turns')
 
+
+
+def test_prehide_dynamic_nested_role_updates():
+    skeletons = ''.join([
+        '<section id="turn0" data-testid="conversation-turn-0"><div>u0</div></section>',
+        '<section id="turn1" data-testid="conversation-turn-1"><div>a1</div></section>',
+        '<section id="turn2" data-testid="conversation-turn-2"><div>u2</div></section>',
+        '<section id="turn3" data-testid="conversation-turn-3"><div>a3</div></section>',
+    ])
+    page = f'''<!doctype html><html><head>{chrome_stub(1)}<script>{PREHIDE_JS}</script></head><body>{skeletons}
+<script>
+setTimeout(()=>{{
+  const roles=['user','assistant','user','assistant'];
+  roles.forEach((role,index)=>{{
+    const nested=document.createElement('span');
+    nested.setAttribute('data-message-author-role',role);
+    document.getElementById('turn'+index)?.appendChild(nested);
+  }});
+}},100);
+setTimeout(()=>{{
+  const out=document.createElement('pre');out.id='csg-test-result';
+  out.textContent=JSON.stringify({{
+    oldMarked:document.getElementById('turn0')?.hasAttribute('data-csg-prehide-old-turn')||false,
+    latestMarked:document.getElementById('turn2')?.hasAttribute('data-csg-prehide-old-turn')||false
+  }});
+  document.body.appendChild(out);
+}},360);
+</script></body></html>'''
+    result = serve_page('/c/prehide-dynamic-role/', page, 620)
+    assert result == {'oldMarked': True, 'latestMarked': False}, result
+    print('PASS prehide-dynamic-nested-role-refreshes-turn-role')
 
 def test_recent_loader_handoff():
     turns = ''.join([
@@ -260,6 +323,41 @@ setTimeout(()=>{{const out=document.createElement('pre');out.id='csg-test-result
     print('PASS virtualized-streaming-tail-does-not-hold-loader-open')
 
 
+
+def test_completed_loader_fade_survives_semantic_waiting():
+    turns = ''.join([
+        '<section data-testid="conversation-turn-0" data-turn="user">u0</section>',
+        '<section data-testid="conversation-turn-1" data-turn="assistant"><div class="markdown">a1</div></section>',
+        '<section data-testid="conversation-turn-2" data-turn="user">u2</section>',
+        '<section data-testid="conversation-turn-3" data-turn="assistant"><div class="markdown">a3</div></section>',
+        '<section data-testid="conversation-turn-4" data-turn="user">u4</section>',
+        '<section data-testid="conversation-turn-5" data-turn="assistant"><div class="markdown">a5</div></section>',
+    ])
+    race_js = RECENT_JS.replace(
+        '  function publishState(value) {',
+        '  window.__csgTestPublishState = publishState;\n  function publishState(value) {',
+        1,
+    )
+    page = f'''<!doctype html><html><head><style>.group\\/scroll-root{{height:320px;overflow-y:auto}}section{{min-height:80px}}</style>
+{chrome_stub(3)}<script>{PREHIDE_JS}</script></head><body><div class="group/scroll-root">{turns}</div>
+<script>{race_js}</script><script>
+const race=setInterval(()=>{{
+ const st=window.__csgRecentTestState;
+ const loader=document.getElementById('csg-recent-loading');
+ if(!st?.loadingUiFinished || !loader) return;
+ clearInterval(race);
+ window.__csgTestPublishState('waiting');
+ setTimeout(()=>{{
+   const out=document.createElement('pre');out.id='csg-test-result';
+   out.textContent=JSON.stringify({{loaderExists:!!document.getElementById('csg-recent-loading'),loadingUiFinished:st.loadingUiFinished}});
+   document.body.appendChild(out);
+ }},1000);
+}},10);
+</script></body></html>'''
+    result = serve_page('/c/loader-fade-race/', page, 1700)
+    assert result == {'loaderExists': False, 'loadingUiFinished': True}, result
+    print('PASS completed-loader-fade-survives-semantic-waiting')
+
 def test_recent_loader_watchdog_fails_open():
     page = f'''<!doctype html><html><head>{chrome_stub(3)}<script>{PREHIDE_JS}</script></head><body>
 <div class="group/scroll-root"></div>
@@ -278,10 +376,12 @@ def main():
     test_prehide_early_loader()
     test_prehide_folds_old_turns_without_zero_height()
     test_prehide_ignores_streaming_inner_mutations()
+    test_prehide_dynamic_nested_role_updates()
     test_recent_loader_handoff()
     test_short_history_uses_real_target()
     test_share_provisional_boundary_is_not_overclaimed()
     test_virtualized_streaming_tail_does_not_hold_loader_open()
+    test_completed_loader_fade_survives_semantic_waiting()
     test_recent_loader_watchdog_fails_open()
     print('LOADING INDICATOR TESTS OK')
 

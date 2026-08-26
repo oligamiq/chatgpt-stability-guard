@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.26 — 2026-08-26
+
+- Hardened Recent-N semantic window tracking across ChatGPT virtualization, branch edits, regenerate flows, delayed tail remounts, SPA route changes, recycled turn nodes, mixed numeric/opaque identities, and small viewport scroll roots while preserving fail-open behavior for ambiguous history.
+- Fixed Recent-N loading so virtualized chats never keep the visible preparation gauge open while semantic boundary discovery continues in the background; also fixed completion-fade races and normalized Recent-N values consistently to integer range 1–100.
+- Preserved independent per-chat accordion overrides across remounts and boundary advances, avoided forcing users back to the bottom after they intentionally scroll into history during generation, and kept final automatic scroll correction bounded to one pass per route.
+- Removed long-chat performance traps from streaming observers and sequence reconciliation: streaming content no longer triggers whole-turn refolds, deep role scans, repeated sequence index scans, or unnecessary subtree registration.
+- Added exhaustive, randomized property, performance-contract, loading-race, virtualization, regeneration, metadata-retention, and high-mutation stress coverage; the critical Recent-N suites pass five consecutive runs, the complete suite passes, authenticated live ChatGPT smoke confirms N=3 accordion behavior with no persistent loader, and the final adversarial review is clean.
+
 ## 1.0.25 — 2026-08-25
 
 - Replaced repeated whole-conversation turn discovery with incremental mounted-turn registries in the document-start prehide path, recent-N controller, and main content runtime. Each runtime seeds mounted turns once, then tracks additions, removals, recycling, and ordering from structural mutations.

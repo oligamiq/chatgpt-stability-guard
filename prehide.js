@@ -11,13 +11,18 @@
   function runGuard(uiLanguage) {
     const root = document.documentElement;
 
+    function normalizeRecentExchanges(value) {
+      const numeric = Number(value);
+      return Math.max(1, Math.min(100, Math.round(Number.isFinite(numeric) ? numeric : 3)));
+    }
+
     function normalizeSettings(raw = {}) {
       const legacy = raw.hideToolChrome;
       return {
         enabled: raw.enabled !== false,
         hideToolSummary: raw.hideToolSummary ?? legacy ?? true,
         showRecentOnly: raw.showRecentOnly === true,
-        recentExchanges: Math.max(1, Math.min(100, Number(raw.recentExchanges) || 3))
+        recentExchanges: normalizeRecentExchanges(raw.recentExchanges)
       };
     }
 
@@ -89,29 +94,42 @@
       let orderDirty = false;
       let scheduled = false;
 
+      const turnSelector = '[data-testid^="conversation-turn-"]';
+      const roleSelector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"]';
       const track = (turn) => {
-        if (!(turn instanceof Element) || !turn.matches('[data-testid^="conversation-turn-"]')) return;
-        if (!tracked.has(turn)) {
+        if (!(turn instanceof Element) || !turn.matches(turnSelector)) return false;
+        const added = !tracked.has(turn);
+        if (added) {
           tracked.add(turn);
           orderDirty = true;
         }
-        roles.set(turn, fastTurnRole(turn));
+        const previousRole = roles.get(turn) || '';
+        const nextRole = fastTurnRole(turn);
+        roles.set(turn, nextRole);
+        return added || previousRole !== nextRole;
       };
       const untrack = (turn) => {
-        if (!(turn instanceof Element) || !tracked.delete(turn)) return;
+        if (!(turn instanceof Element) || !tracked.delete(turn)) return false;
         turn.removeAttribute('data-csg-prehide-old-turn');
         orderDirty = true;
+        return true;
       };
       const trackNode = (node) => {
-        if (!(node instanceof Element)) return;
-        if (node.matches('[data-testid^="conversation-turn-"]')) track(node);
-        node.querySelectorAll?.('[data-testid^="conversation-turn-"]').forEach(track);
+        if (!(node instanceof Element)) return false;
+        if (node.matches(turnSelector)) return track(node);
+        let changed = false;
+        node.querySelectorAll?.(turnSelector).forEach((turn) => { changed = track(turn) || changed; });
+        return changed;
       };
       const untrackNode = (node) => {
-        if (!(node instanceof Element)) return;
-        if (tracked.has(node)) untrack(node);
-        node.querySelectorAll?.('[data-testid^="conversation-turn-"]').forEach(untrack);
+        if (!(node instanceof Element)) return false;
+        if (tracked.has(node)) return untrack(node);
+        let changed = false;
+        node.querySelectorAll?.(turnSelector).forEach((turn) => { changed = untrack(turn) || changed; });
+        return changed;
       };
+      const nodeContainsRoleEvidence = (node) => node instanceof Element &&
+        (node.matches(roleSelector) || (node.firstElementChild && node.querySelector(roleSelector)));
       const turnsInOrder = () => {
         if (!orderDirty) return ordered;
         ordered = [...tracked].filter((turn) => turn.isConnected && turn.matches('[data-testid^="conversation-turn-"]'));
@@ -155,29 +173,29 @@
             const target = mutation.target instanceof Element ? mutation.target : null;
             if (!target) continue;
             const wasTurn = mutation.attributeName === 'data-testid' && String(mutation.oldValue || '').startsWith('conversation-turn-');
-            if (wasTurn && !target.matches('[data-testid^="conversation-turn-"]')) {
-              untrack(target);
-              changed = true;
+            if (wasTurn && !target.matches(turnSelector)) {
+              changed = untrack(target) || changed;
             } else {
-              const turn = target.matches('[data-testid^="conversation-turn-"]') ? target : target.closest('[data-testid^="conversation-turn-"]');
-              if (turn) {
-                track(turn);
-                changed = true;
-              }
+              const turn = target.matches(turnSelector) ? target : target.closest(turnSelector);
+              if (turn) changed = track(turn) || changed;
             }
             if (mutation.attributeName === 'data-csg-recent-runtime') changed = true;
             continue;
           }
-          for (const node of mutation.removedNodes) {
-            if (!(node instanceof Element)) continue;
-            untrackNode(node);
-            changed = true;
+          const targetTurn = mutation.target instanceof Element
+            ? (mutation.target.matches(turnSelector) ? mutation.target : mutation.target.closest(turnSelector))
+            : null;
+          if (targetTurn) {
+            // Markdown streaming cannot introduce author-role evidence. Avoid a
+            // deep role-selector scan on every remounted token/wrapper subtree.
+            const insideMarkdown = mutation.target instanceof Element && Boolean(mutation.target.closest('.markdown'));
+            const roleChanged = !insideMarkdown && [...mutation.addedNodes, ...mutation.removedNodes]
+              .some(nodeContainsRoleEvidence);
+            if (roleChanged) changed = track(targetTurn) || changed;
+            continue;
           }
-          for (const node of mutation.addedNodes) {
-            if (!(node instanceof Element)) continue;
-            trackNode(node);
-            changed = true;
-          }
+          for (const node of mutation.removedNodes) changed = untrackNode(node) || changed;
+          for (const node of mutation.addedNodes) changed = trackNode(node) || changed;
         }
         if (changed) schedule();
       });

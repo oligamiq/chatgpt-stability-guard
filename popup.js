@@ -120,6 +120,11 @@ function applyLanguage() {
   updatePendingNotice();
 }
 
+function normalizeRecentExchanges(value) {
+  const numeric = Number(value);
+  return Math.min(100, Math.max(1, Math.round(Number.isFinite(numeric) ? numeric : DEFAULTS.recentExchanges)));
+}
+
 function normalizeSettings(raw = {}) {
   const legacy = raw.hideToolChrome;
   return {
@@ -128,6 +133,7 @@ function normalizeSettings(raw = {}) {
     hideToolSummary: raw.hideToolSummary ?? legacy ?? DEFAULTS.hideToolSummary,
     hideToolEmbeds: raw.hideToolEmbeds ?? legacy ?? DEFAULTS.hideToolEmbeds,
     prehideToolPlaceholders: raw.prehideToolPlaceholders ?? legacy ?? DEFAULTS.prehideToolPlaceholders,
+    recentExchanges: normalizeRecentExchanges(raw.recentExchanges),
     autoContinuePatternMode: raw.autoContinuePatternMode === 'regex' ? 'regex' : 'glob',
     autoContinuePattern: typeof raw.autoContinuePattern === 'string'
       ? raw.autoContinuePattern.slice(0, 512) : DEFAULTS.autoContinuePattern
@@ -212,7 +218,7 @@ async function saveFromForm() {
     else if (el.type === 'number') settings[id] = Number(el.value);
     else settings[id] = String(el.value);
   }
-  settings.recentExchanges = Math.min(100, Math.max(1, settings.recentExchanges || 3));
+  settings.recentExchanges = normalizeRecentExchanges(settings.recentExchanges);
   settings.keepTurns = Math.min(100, Math.max(2, settings.keepTurns || 12));
   settings.autoContinuePatternMode = settings.autoContinuePatternMode === 'regex' ? 'regex' : 'glob';
   settings.autoContinuePattern = String(settings.autoContinuePattern || '').slice(0, 512);

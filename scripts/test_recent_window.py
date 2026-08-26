@@ -499,18 +499,18 @@ const identityTimer=setInterval(()=>{
 },100);
 '''
     run_case(
-        'numeric-message-identity-change-fails-open',
+        'numeric-message-identity-change-recovers-current-branch',
         '/c/identity-change/',
         identity_body,
         [
-            {'name':'old-user-revealed','selector':'[data-testid="conversation-turn-0"]','hidden':False},
-            {'name':'old-assistant-revealed','selector':'[data-testid="conversation-turn-1"]','hidden':False},
+            {'name':'old-user-refolded-after-recovery','selector':'[data-testid="conversation-turn-0"]','hidden':True},
+            {'name':'old-assistant-refolded-after-recovery','selector':'[data-testid="conversation-turn-1"]','hidden':True},
             {'name':'changed-boundary-visible','selector':'[data-testid="conversation-turn-2"]','hidden':False},
         ],
         n=2,
         after_js=identity_after,
         delay=5200,
-        expected_state='degraded',
+        expected_state='ready', boundary='t:conversation-turn-2', expected_recent_mode='per-chat',
     )
 
     mixed_body = ''.join([
