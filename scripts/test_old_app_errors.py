@@ -20,6 +20,13 @@ def make_turn(index, body):
     return f'<section data-testid="conversation-turn-{index}">{body}</section>'
 
 
+def make_exchange(key, body):
+    return (
+        f'<div class="exchange-cell"><div data-turn-key="{html.escape(key)}">'
+        f'<div data-content-search-turn-key="{html.escape(key)}">{body}</div></div></div>'
+    )
+
+
 def error_card(text="Failed to fetch template"):
     return (
         '<aside class="text-token-text-error surface-error">'
@@ -113,6 +120,18 @@ def main():
             {"name": "old", "selector": '[data-testid="conversation-turn-1"] aside', "hidden": True},
             {"name": "latest", "selector": '[data-testid="conversation-turn-3"] aside', "hidden": False},
         ],
+    )
+    run_case(
+        "authenticated-exchange-old-error-hidden-latest-visible",
+        make_exchange('ex-0', '<div>old user</div>') +
+        make_exchange('ex-1', error_card()) +
+        make_exchange('ex-2', '<div>newer user</div>') +
+        make_exchange('ex-3', error_card()),
+        [
+            {"name": "authenticated-old", "selector": '[data-turn-key="ex-1"] aside', "hidden": True},
+            {"name": "authenticated-latest", "selector": '[data-turn-key="ex-3"] aside', "hidden": False},
+        ],
+        check_delay=3500,
     )
     run_case(
         "current-div-error-hidden-latest-visible",

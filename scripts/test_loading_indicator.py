@@ -145,12 +145,12 @@ def test_prehide_ignores_streaming_inner_mutations():
 window.__turnQueries=0; window.__elementTurnQueries=0; window.__roleQueries=0; window.__prehideFoldChecks=0;
 const __qsa=document.querySelectorAll.bind(document);
 document.querySelectorAll=function(selector){
- if(selector==='[data-testid^="conversation-turn-"]') window.__turnQueries+=1;
+ if(selector==='[data-testid^="conversation-turn-"],[data-turn-key]') window.__turnQueries+=1;
  return __qsa(selector);
 };
 const __elementQsa=Element.prototype.querySelectorAll;
 Element.prototype.querySelectorAll=function(selector){
- if(selector==='[data-testid^="conversation-turn-"]') window.__elementTurnQueries+=1;
+ if(selector==='[data-testid^="conversation-turn-"],[data-turn-key]') window.__elementTurnQueries+=1;
  return __elementQsa.call(this,selector);
 };
 const __elementQuery=Element.prototype.querySelector;

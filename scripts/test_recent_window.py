@@ -49,6 +49,29 @@ def opaque_turn(key, role, text):
     return f'<section class="turn" data-testid="conversation-turn-{key}" data-turn="{role}">{body}</section>'
 
 
+def exchange_turn(key, *, user=True, assistant=True, first=False, height=240):
+    parts = []
+    if user:
+        parts.append(
+            '<div class="group flex flex-col"><h4 class="sr-only m-0 select-none">You said:</h4>'
+            f'<div class="user-message">user-{html.escape(key)}</div></div>'
+        )
+    if assistant:
+        message_id = f'msg-{key}'
+        parts.append(
+            f'<div data-chatgpt-search-message-ids="{html.escape(message_id)} {html.escape(message_id)}">'
+            '<h4 class="sr-only m-0 select-none" data-conversation-role="assistant">ChatGPT said:</h4>'
+            f'<div class="markdown">assistant-{html.escape(key)}</div></div>'
+        )
+    margin = 0 if first else 6
+    return (
+        f'<div id="cell-{html.escape(key)}" class="exchange-cell" style="height:{height}px;margin-top:{margin}px">'
+        f'<div id="exchange-{html.escape(key)}" data-turn-key="{html.escape(key)}">'
+        f'<div data-content-search-turn-key="{html.escape(key)}">{"".join(parts)}</div>'
+        '</div></div>'
+    )
+
+
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -98,7 +121,9 @@ setTimeout(()=>{{
     const hidden=!!el?.classList.contains('csg-hidden-old-turn');
     const collapsed=!!el?.classList.contains('csg-chat-collapsed');
     const folded=hidden||collapsed;
-    return {{name:c.name,actual:folded,hidden,collapsed,expected:c.hidden,exists:!!el,pass:!!el&&folded===c.hidden}};
+    const height=el?.getBoundingClientRect().height ?? null;
+    const heightOk=c.maxHeight==null || (height!=null && height<=c.maxHeight);
+    return {{name:c.name,actual:folded,hidden,collapsed,height,maxHeight:c.maxHeight??null,expected:c.hidden,exists:!!el,pass:!!el&&folded===c.hidden&&heightOk}};
   }});
   const s=window.__csgRecentTestState;
   const out=document.createElement('pre');
@@ -184,6 +209,55 @@ setTimeout(()=>{{
 
 
 def main():
+    authenticated_exchange_body = '<div class="flex flex-col">' + ''.join([
+        exchange_turn('ex-1', first=True, height=420),
+        exchange_turn('ex-2', height=460),
+        exchange_turn('ex-3', assistant=False, height=180),
+        exchange_turn('ex-4', height=380),
+        exchange_turn('ex-5', height=440),
+    ]) + '</div>'
+    run_case(
+        'authenticated-private-exchange-roots',
+        '/c/authenticated-private/',
+        authenticated_exchange_body,
+        [
+            {'name':'old-exchange-1-collapsed','selector':'#exchange-ex-1','hidden':True},
+            {'name':'old-exchange-2-collapsed','selector':'#exchange-ex-2','hidden':True},
+            {'name':'collapsed-cell-removes-fixed-height-gap','selector':'#cell-ex-1','hidden':False,'maxHeight':80},
+            {'name':'boundary-exchange-visible','selector':'#exchange-ex-3','hidden':False},
+            {'name':'recent-exchange-4-visible','selector':'#exchange-ex-4','hidden':False},
+            {'name':'latest-exchange-visible','selector':'#exchange-ex-5','hidden':False},
+        ],
+        n=3, delay=2600, boundary='x:ex-3', expected_recent_mode='per-chat', expected_global_ui=False,
+    )
+
+    authenticated_short_body = '<div class="flex flex-col">' + exchange_turn('solo', first=True, height=360) + '</div>'
+    run_case(
+        'authenticated-private-short-history',
+        '/c/authenticated-short/',
+        authenticated_short_body,
+        [{'name':'solo-visible','selector':'#exchange-solo','hidden':False}],
+        n=3, delay=2200, boundary='x:solo', expected_recent_mode='per-chat', expected_global_ui=False,
+    )
+
+    authenticated_assistant_only = '<div class="flex flex-col">' + ''.join([
+        exchange_turn('task-1', user=False, first=True, height=220),
+        exchange_turn('task-2', user=False, height=220),
+        exchange_turn('task-3', user=False, height=220),
+        exchange_turn('task-4', user=False, height=220),
+    ]) + '</div>'
+    run_case(
+        'authenticated-assistant-only-exchange-roots',
+        '/c/authenticated-assistant-only/',
+        authenticated_assistant_only,
+        [
+            {'name':'old-task-collapsed','selector':'#exchange-task-1','hidden':True},
+            {'name':'boundary-task-visible','selector':'#exchange-task-2','hidden':False},
+            {'name':'latest-task-visible','selector':'#exchange-task-4','hidden':False},
+        ],
+        n=3, delay=2600, boundary='x:task-2', expected_recent_mode='per-chat', expected_global_ui=False,
+    )
+
     live_sparse_body = ''.join([
         turn(1, 'user', 'old request 1'),
         turn(2, 'assistant', 'old response 1'),
@@ -823,7 +897,7 @@ const recycleTurn=setInterval(()=>{
 window.__csgTurnQueryCount=0;
 const __csgNativeQsa=document.querySelectorAll.bind(document);
 document.querySelectorAll=function(selector){
-  if(selector==='[data-testid^=\"conversation-turn-\"]') window.__csgTurnQueryCount+=1;
+  if(selector==='[data-testid^=\"conversation-turn-\"],[data-turn-key]') window.__csgTurnQueryCount+=1;
   return __csgNativeQsa(selector);
 };
 '''

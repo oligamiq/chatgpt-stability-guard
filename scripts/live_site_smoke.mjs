@@ -173,7 +173,7 @@ async function launchChrome(url) {
     });
   } catch (error) {
     await stopChild(child);
-    fs.rmSync(profile, { recursive: true, force: true });
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
     throw error;
   }
 
@@ -346,7 +346,7 @@ async function runSmoke() {
   } finally {
     cdp?.close();
     await stopChild(launched.child);
-    fs.rmSync(launched.profile, { recursive: true, force: true });
+    fs.rmSync(launched.profile, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
   }
 }
 

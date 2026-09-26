@@ -164,7 +164,9 @@
       return text.startsWith('View config ·') || text.startsWith('設定を表示 ·');
     }
 
-    const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const LEGACY_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const EXCHANGE_TURN_SELECTOR = '[data-turn-key]';
+    const TURN_SELECTOR = `${LEGACY_TURN_SELECTOR},${EXCHANGE_TURN_SELECTOR}`;
 
     function registerMountedTurn(turn) {
       if (!(turn instanceof Element) || !turn.matches(TURN_SELECTOR)) return false;
@@ -236,7 +238,8 @@
         attributes: true,
         attributeOldValue: true,
         attributeFilter: [
-          'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
+          'data-testid', 'data-turn-key', 'data-message-id', 'data-conversation-role',
+          'data-chatgpt-search-message-ids', 'href', 'tabindex', 'role', 'contenteditable', 'type',
           'aria-modal', 'aria-label', 'aria-expanded', 'title'
         ]
       });
@@ -817,13 +820,18 @@
     }
 
     function turnId(turn) {
-      return turn instanceof Element ? (turn.getAttribute('data-testid') || '') : '';
+      if (!(turn instanceof Element)) return '';
+      const testId = turn.getAttribute('data-testid');
+      if (testId) return testId;
+      const exchangeKey = turn.getAttribute('data-turn-key');
+      return exchangeKey ? `exchange:${exchangeKey}` : '';
     }
 
     function turnMessageId(turn) {
       if (!(turn instanceof Element)) return '';
       return turn.getAttribute('data-message-id') ||
-        turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') || '';
+        turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') ||
+        turn.querySelector('[data-chatgpt-search-message-ids]')?.getAttribute('data-chatgpt-search-message-ids') || '';
     }
 
     function routeTurnIdentity(turn) {
@@ -873,6 +881,10 @@
       const protectedTurns = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
       for (const turn of turns) {
         const index = turnIndexFromId(turnId(turn));
+        // Authenticated exchange roots have opaque data-turn-key identities but
+        // stable mounted DOM order. The tail slice above is the safety boundary;
+        // do not fail-open every exchange merely because no numeric id exists.
+        if (turn.matches(EXCHANGE_TURN_SELECTOR) && index < 0) continue;
         if (index < 0 || latestIndex < 0 || index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1)) {
           protectedTurns.add(turn);
         }
@@ -890,6 +902,10 @@
       if (!(turn instanceof Element)) return true;
       if (!isGenerationActive()) return false;
       if (protectedTurns?.has(turn)) return true;
+      // For authenticated exchange roots the protected set is already derived
+      // from mounted DOM order, so an older exchange outside that set is safe to
+      // optimize. Legacy opaque turn ids remain fail-open below.
+      if (turn.matches(EXCHANGE_TURN_SELECTOR)) return false;
       const index = turnIndexFromId(turnId(turn));
       if (index < 0 || latestIndex < 0) return true;
       return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
@@ -1114,8 +1130,9 @@
     }
 
     function updateLatestTurnKnowledge() {
-      // Current ChatGPT turn IDs are numeric. If the site moves to opaque IDs,
-      // this feature intentionally fails open instead of guessing the latest turn.
+      // Legacy DOM exposes numeric conversation-turn-N ids. Authenticated chats
+      // now use opaque data-turn-key exchange roots; those are protected by DOM
+      // order in computeLatestBoundaryTurns() rather than a fabricated index.
       let mountedMax = -1;
       for (const turn of getTurns()) {
         mountedMax = Math.max(mountedMax, turnIndexFromId(turnId(turn)));
@@ -1149,8 +1166,10 @@
         }
         const turn = aside.closest(TURN_SELECTOR);
         const index = turnIndexFromId(turnId(turn));
-        const canProveOld = index >= 0 && state.latestTurnIndex >= 0 &&
-          turn instanceof Element && !currentLiveTurns.has(turn);
+        const exchangeOrdered = turn instanceof Element && turn.matches(EXCHANGE_TURN_SELECTOR);
+        const legacyOrdered = index >= 0 && state.latestTurnIndex >= 0;
+        const canProveOld = turn instanceof Element && !currentLiveTurns.has(turn) &&
+          (legacyOrdered || exchangeOrdered);
         aside.classList.toggle('csg-old-app-load-error', canProveOld);
       }
       state.oldAppStableTurns = routeTurnSnapshot();
@@ -2434,7 +2453,7 @@
       const compact = new Set();
       for (const node of state.pendingRoots) {
         if (!(node instanceof Element) || !node.isConnected || isRecentAnalysisSuppressed(node)) continue;
-        const turn = node.closest('[data-testid^="conversation-turn-"]');
+        const turn = node.closest(TURN_SELECTOR);
         const parent = node.parentElement;
         const anchor = turn || (parent && parent !== document.body ? parent : node);
         compact.add(anchor);
@@ -2442,7 +2461,7 @@
       if (compact.size > 160) {
         const mountedTurns = [...getTurns()];
         const extras = [...compact]
-          .filter((node) => !node.matches?.('[data-testid^="conversation-turn-"]'));
+          .filter((node) => !node.matches?.(TURN_SELECTOR));
         const errorExtras = extras.filter((node) =>
           node.matches?.('aside[class*="surface-error"], .csg-old-app-load-error') ||
           Boolean(node.querySelector?.('aside[class*="surface-error"], .csg-old-app-load-error'))
@@ -2562,6 +2581,13 @@
       const roleNode = turn.querySelector('[data-message-author-role]');
       const nested = roleNode?.getAttribute('data-message-author-role');
       if (nested) return nested.toLowerCase();
+      if (turn.matches(EXCHANGE_TURN_SELECTOR)) {
+        if (turn.querySelector('[data-conversation-role="assistant"]')) return 'assistant';
+        const headings = [...turn.querySelectorAll('h4')]
+          .map((heading) => normalizeLabel(heading.textContent || ''));
+        if (headings.includes('ChatGPT said:')) return 'assistant';
+        if (headings.includes('You said:')) return 'user';
+      }
       if (turn.classList.contains('user-turn') || turn.querySelector('.user-turn')) return 'user';
       if (turn.classList.contains('agent-turn') || turn.querySelector('.agent-turn')) return 'assistant';
       return '';
@@ -3024,8 +3050,10 @@
         );
       }
       if (mutation.type !== 'attributes') return false;
-      const oldId = String(mutation.oldValue || '');
-      return mutation.target.matches?.(TURN_SELECTOR) || oldId.startsWith('conversation-turn-');
+      const oldValue = String(mutation.oldValue || '');
+      const wasLegacyTurn = mutation.attributeName === 'data-testid' && oldValue.startsWith('conversation-turn-');
+      const wasExchangeTurn = mutation.attributeName === 'data-turn-key' && Boolean(oldValue);
+      return mutation.target.matches?.(TURN_SELECTOR) || wasLegacyTurn || wasExchangeTurn;
     }
 
     function bindSummaryBoundaryObserver() {
@@ -3056,7 +3084,7 @@
         if (root.matches(TURN_SELECTOR)) {
           state.summaryBoundaryObserver.observe(root, {
             attributes: true,
-            attributeFilter: ['data-testid'],
+            attributeFilter: ['data-testid', 'data-turn-key'],
             attributeOldValue: true
           });
         } else {
@@ -3180,8 +3208,11 @@
             generationStateChanged = true;
           }
           scheduleSummaryMutationRoot(target);
-          if (mutation.attributeName === 'data-testid' &&
-              (target.matches(TURN_SELECTOR) || String(mutation.oldValue || '').startsWith('conversation-turn-'))) {
+          const wasLegacyTurn = mutation.attributeName === 'data-testid' &&
+            String(mutation.oldValue || '').startsWith('conversation-turn-');
+          const wasExchangeTurn = mutation.attributeName === 'data-turn-key' && Boolean(mutation.oldValue);
+          if ((mutation.attributeName === 'data-testid' || mutation.attributeName === 'data-turn-key') &&
+              (target.matches(TURN_SELECTOR) || wasLegacyTurn || wasExchangeTurn)) {
             if (target.matches(TURN_SELECTOR)) registerMountedTurn(target);
             else unregisterMountedTurn(target);
             conversationTurnChanged = true;

@@ -278,6 +278,22 @@ html[data-csg-recent-mode="per-chat"] .csg-chat-collapsed > :not(.csg-chat-toggl
   display: none !important;
 }
 
+/* Authenticated ChatGPT now wraps each exchange in a fixed-height virtualizer
+   cell whose direct child carries data-turn-key. Collapsing only that child
+   leaves the cell's inline height as a giant blank gap, so release the fixed
+   height while the exchange is folded. The React-owned cell stays mounted. */
+html[data-csg-recent-mode="per-chat"] :has(> [data-turn-key].csg-chat-collapsed) {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+html[data-csg-recent-mode="per-chat"] :has(> [data-turn-key].csg-hidden-old-turn) {
+  height: 0 !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+  overflow: hidden !important;
+}
+
 
 html.csg-lazy-heavy .csg-heavy {
   content-visibility: auto;

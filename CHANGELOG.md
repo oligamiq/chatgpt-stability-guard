@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.28 — 2026-09-26
+
+- Restored compatibility with ChatGPT's authenticated conversation DOM by treating current `[data-turn-key]` exchange roots as first-class conversation items alongside legacy `conversation-turn-*` articles across Recent-N discovery, per-chat toggles, pre-hide/loading state, mutation compaction, and action scoping.
+- Preserved newest Tool/App/action surfaces and stale App-error handling under the authenticated DOM while compacting collapsed virtualizer cells instead of leaving large blank regions; logged-in live validation reached `recent=ready` / `per-chat` with 5 exchanges, 2 collapsed exchanges, 5 toggles, no loader, and 34px collapsed parent cells.
+- Added authenticated exchange-root regression coverage, including newest Tool/App boundary protection, and updated existing Recent-N, Auto Continue, loading, old-App-error, stress/performance, and live-smoke fixtures to exercise both DOM shapes.
+
 ## 1.0.27 — 2026-08-26
 
 - Fixed reply-time blank gaps when ChatGPT recycles an already-mounted empty node into a virtual-height spacer by class mutation; spacer discovery now follows bounded turn-local sibling lanes even if the conversation LCA widens, refreshes targets for inserted siblings, and independently learns entirely new virtualizer lanes even in summary-only mode.

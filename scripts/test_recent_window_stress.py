@@ -135,13 +135,14 @@ const removeTail=setInterval(()=>{
     storm_before = r'''
 window.__csgStressDocTurnQueries=0; window.__csgStressElementTurnQueries=0;
 const __nativeStressQsa=document.querySelectorAll.bind(document);
+const __csgStressTurnSelector='[data-testid^="conversation-turn-"],[data-turn-key]';
 document.querySelectorAll=function(selector){
-  if(selector==='[data-testid^="conversation-turn-"]') window.__csgStressDocTurnQueries+=1;
+  if(selector===__csgStressTurnSelector) window.__csgStressDocTurnQueries+=1;
   return __nativeStressQsa(selector);
 };
 const __nativeStressElementQsa=Element.prototype.querySelectorAll;
 Element.prototype.querySelectorAll=function(selector){
-  if(selector==='[data-testid^="conversation-turn-"]') window.__csgStressElementTurnQueries+=1;
+  if(selector===__csgStressTurnSelector) window.__csgStressElementTurnQueries+=1;
   return __nativeStressElementQsa.call(this,selector);
 };
 '''
