@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.33 — 2026-09-27
+
+- Fixes the remaining authenticated Project/Work Tool rows visible in real screenshots: Tool result UI may live outside `[data-turn-key]` exchange roots, so a turn-only scan could never see it.
+- Detects `View lines …` / `View file …` from visible text as well as buttons, including split-span text and flattened Tool-name/result sibling rows, while still excluding normal markdown and Connect/Auth/Retry UI.
+- On generation completion, performs one bounded `<main>` sweep so turnless Work/Tool rows are removed after settling without touching live bootstrap UI.
+- Expanded the Tool-result regression fixture to cover control, plain-text, split-text, turnless-main, flattened sibling, live-generation, auth fail-open, and markdown false-positive cases.
+
 ## 1.0.32 — 2026-09-27
 
 - Hides current ChatGPT standalone Tool result cards such as `xubuntu-desktop-commander` rows followed by `View lines …` / `View file …`; these cards are rendered outside the legacy `group/tool-message` summary shell and survived 1.0.31.

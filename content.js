@@ -1806,6 +1806,7 @@
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';
     const TOOL_RESULT_CARD_CONTROL_SELECTOR = 'button,[role="button"],[aria-expanded],a[href]';
     const TOOL_RESULT_CARD_ACTION_RE = /^(?:View\s+(?:lines?\s+\d+(?:\s*[-–—]\s*\d+)?|file)\s*(?:[·•]\s*.+)?|(?:行|ファイル)[^。\n]{0,120}(?:表示|開く|見る))$/i;
+    const TOOL_RESULT_CARD_TEXT_HINT_RE = /(?:\bView\s+(?:lines?|file)\b|(?:行|ファイル)[^。\n]{0,80}(?:表示|開く|見る))/i;
 
     function toolResultActionLabel(control) {
       if (!(control instanceof Element) || control.closest('.markdown')) return '';
@@ -1814,6 +1815,21 @@
         boundedControlLabel(control, 281)
       ];
       return labels.find((label) => label && label.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(label)) || '';
+    }
+
+    function toolResultHintCount(value) {
+      const text = normalizeLabel(value);
+      const english = text.match(/\bView\s+(?:lines?|file)\b/gi)?.length || 0;
+      const japanese = text.match(/(?:行|ファイル)[^。\n]{0,80}(?:表示|開く|見る)/g)?.length || 0;
+      return english + japanese;
+    }
+
+    function isToolResultProviderLabel(value) {
+      const text = normalizeLabel(value).replace(/[↗↘↙↖⌄›»]/g, '').trim();
+      if (!text || text.length > 160 || /[.!?。！？]/.test(text)) return false;
+      if (/^(?:view|open|show|hide|expand|collapse)\b/i.test(text)) return false;
+      return /^[a-z0-9][a-z0-9_.:]*[-_.:][a-z0-9_.:-]+$/i.test(text) ||
+        /(?:desktop-commander|\bmcp\b|composio|connector|plugin|tool)/i.test(text);
     }
 
     function hasToolResultFailOpenAction(shell, resultControl) {
@@ -1828,34 +1844,100 @@
       });
     }
 
-    function toolResultCardShellFor(control, latestTurnIndex = mountedLatestTurnIndex(), protectedTurns = computeLiveProtectedTurns(latestTurnIndex)) {
-      if (!(control instanceof Element) || control.closest('.markdown')) return null;
-      const actionLabel = toolResultActionLabel(control);
-      if (!actionLabel) return null;
-      const turn = control.closest(TURN_SELECTOR);
-      if (!(turn instanceof Element) || isProtectedLiveToolTurn(control, latestTurnIndex, protectedTurns)) return null;
+    function toolResultTextAnchorsFor(scope, maxHits = 128) {
+      if (!(scope instanceof Element) || scope.closest('.markdown')) return [];
+      const anchors = new Set();
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!(parent instanceof Element) || parent.closest('.markdown,script,style,textarea,[contenteditable="true"]')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          const text = normalizeLabel(node.nodeValue || '');
+          return text && TOOL_RESULT_CARD_TEXT_HINT_RE.test(text)
+            ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+        }
+      });
+      let node = walker.nextNode();
+      while (node && anchors.size < maxHits) {
+        let element = node.parentElement;
+        for (let depth = 0; element instanceof Element && depth < 4; depth += 1) {
+          if (element.closest('.markdown')) break;
+          const label = boundedElementText(element, 281, 32);
+          if (label && label.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(label)) {
+            anchors.add(element);
+            break;
+          }
+          if (!label || label.length > 280) break;
+          element = element.parentElement;
+        }
+        node = walker.nextNode();
+      }
+      return [...anchors];
+    }
 
-      let branch = control;
-      for (let depth = 0; depth < 7; depth += 1) {
+    function toolResultCardPresentationFor(anchor, latestTurnIndex = mountedLatestTurnIndex(), protectedTurns = computeLiveProtectedTurns(latestTurnIndex)) {
+      if (!(anchor instanceof Element) || anchor.closest('.markdown')) return [];
+      const actionLabel = toolResultActionLabel(anchor);
+      if (!actionLabel) return [];
+      const turn = anchor.closest(TURN_SELECTOR);
+      if (turn instanceof Element) {
+        if (isProtectedLiveToolTurn(anchor, latestTurnIndex, protectedTurns)) return [];
+      } else if (isGenerationActive()) {
+        // A turnless Work/tool surface has no stable exchange identity. Preserve it
+        // while generation is active and classify it only after the reply settles.
+        return [];
+      }
+
+      const boundary = turn || anchor.closest('[data-chatgpt-search-message-ids],[data-message-author-role="assistant"],main,[role="main"]');
+      let branch = anchor;
+      let best = null;
+      for (let depth = 0; depth < 8; depth += 1) {
         const parent = branch.parentElement;
-        if (!(parent instanceof Element) || parent === turn || parent.closest('.markdown')) break;
+        if (!(parent instanceof Element) || parent === boundary || parent.closest('.markdown')) break;
         if (parent.matches('[data-chatgpt-search-message-ids],[data-message-author-role="assistant"]')) break;
         const parentText = boundedElementText(parent, 901, 64);
-        if (!parentText || parentText.length > 900) break;
+        if (!parentText || parentText.length > 900 || toolResultHintCount(parentText) > 1) break;
 
         let headerLikeSibling = false;
         for (const child of parent.children) {
-          if (child === branch || child.contains(control)) continue;
+          if (child === branch || child.contains(anchor)) continue;
           if (child.matches('.markdown,.sr-only') || child.querySelector?.('.markdown')) continue;
           const label = boundedElementText(child, 181, 24);
           if (!label || label.length > 180 || TOOL_RESULT_CARD_ACTION_RE.test(label)) continue;
-          headerLikeSibling = true;
-          break;
+          if (isToolResultProviderLabel(label)) {
+            headerLikeSibling = true;
+            break;
+          }
         }
-        if (headerLikeSibling && !hasToolResultFailOpenAction(parent, control)) return parent;
+        const hintAt = parentText.search(TOOL_RESULT_CARD_TEXT_HINT_RE);
+        const prefix = hintAt > 0 ? parentText.slice(0, hintAt) : '';
+        const providerPrefix = hintAt > 0 && isToolResultProviderLabel(prefix);
+        if ((headerLikeSibling || providerPrefix) && !hasToolResultFailOpenAction(parent, anchor)) best = parent;
         branch = parent;
       }
-      return null;
+      if (best) return [best];
+
+      // Some current Work/tool cards are flattened: the provider header and the
+      // “View lines/file” row are siblings without a dedicated outer card. Hide
+      // the pair rather than growing to a container that also owns other calls.
+      let row = anchor;
+      for (let depth = 0; depth < 6; depth += 1) {
+        const rowText = boundedElementText(row, 281, 32);
+        if (rowText && rowText.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(rowText)) {
+          const previous = row.previousElementSibling;
+          const previousText = previous instanceof Element ? boundedElementText(previous, 181, 24) : '';
+          if (previous instanceof Element && !previous.closest('.markdown') &&
+              isToolResultProviderLabel(previousText) &&
+              !hasToolResultFailOpenAction(row.parentElement, anchor)) {
+            return [previous, row];
+          }
+        }
+        const parent = row.parentElement;
+        if (!(parent instanceof Element) || parent === boundary || parent.closest('.markdown')) break;
+        row = parent;
+      }
+      return [];
     }
 
     function markToolResultCard(card) {
@@ -1870,26 +1952,42 @@
       state.toolResultCards.delete(card);
     }
 
+    function toolResultScanScopes(scanRoot) {
+      const scopes = new Set();
+      if (!(scanRoot instanceof Element)) return [];
+      const containingTurn = scanRoot.matches(TURN_SELECTOR) ? scanRoot : scanRoot.closest(TURN_SELECTOR);
+      if (containingTurn) scopes.add(containingTurn);
+      scanRoot.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => scopes.add(turn));
+      const main = scanRoot.matches('main,[role="main"]')
+        ? scanRoot : (scanRoot.closest('main,[role="main"]') || scanRoot.querySelector?.('main,[role="main"]'));
+      const broadRoot = scanRoot === document.body || scanRoot === document.documentElement || scanRoot.matches('main,[role="main"]');
+      // Work/tool execution rows may be rendered as siblings of exchange roots
+      // inside <main>. A turn-only sweep therefore misses exactly the rows seen
+      // in the authenticated Project UI. Include main on broad completion/initial
+      // sweeps while keeping ordinary nested mutation scans local to one turn.
+      if (main instanceof Element && (broadRoot || !scopes.size)) scopes.add(main);
+      if (!scopes.size) scopes.add(scanRoot);
+      return [...scopes];
+    }
+
     function scanToolResultCards(scanRoot, latestTurnIndex = mountedLatestTurnIndex()) {
       if (!(scanRoot instanceof Element) || !state.settings.enabled || !state.settings.hideToolSummary) return;
-      const roots = [];
-      if (scanRoot.matches(TURN_SELECTOR)) roots.push(scanRoot);
-      else {
-        const containingTurn = scanRoot.closest(TURN_SELECTOR);
-        if (containingTurn) roots.push(containingTurn);
-        else roots.push(...scanRoot.querySelectorAll(TURN_SELECTOR));
-      }
       const protectedTurns = computeLiveProtectedTurns(latestTurnIndex);
-      for (const turn of roots) {
-        if (!(turn instanceof Element) || isRecentAnalysisSuppressed(turn)) continue;
-        const found = new Set();
+      for (const scope of toolResultScanScopes(scanRoot)) {
+        if (!(scope instanceof Element) || isRecentAnalysisSuppressed(scope)) continue;
+        if (scope.matches(TURN_SELECTOR) && isProtectedLiveToolTurn(scope, latestTurnIndex, protectedTurns)) continue;
+        if (!scope.matches(TURN_SELECTOR) && isGenerationActive()) continue;
+
+        const anchors = new Set();
         const controls = [];
-        if (turn.matches(TOOL_RESULT_CARD_CONTROL_SELECTOR)) controls.push(turn);
-        controls.push(...turn.querySelectorAll(TOOL_RESULT_CARD_CONTROL_SELECTOR));
-        for (const control of controls) {
-          if (!toolResultActionLabel(control)) continue;
-          const card = toolResultCardShellFor(control, latestTurnIndex, protectedTurns);
-          if (card) {
+        if (scope.matches(TOOL_RESULT_CARD_CONTROL_SELECTOR)) controls.push(scope);
+        controls.push(...scope.querySelectorAll(TOOL_RESULT_CARD_CONTROL_SELECTOR));
+        for (const control of controls) if (toolResultActionLabel(control)) anchors.add(control);
+        toolResultTextAnchorsFor(scope).forEach((anchor) => anchors.add(anchor));
+
+        const found = new Set();
+        for (const anchor of anchors) {
+          for (const card of toolResultCardPresentationFor(anchor, latestTurnIndex, protectedTurns)) {
             found.add(card);
             markToolResultCard(card);
           }
@@ -1899,7 +1997,7 @@
             state.toolResultCards.delete(card);
             continue;
           }
-          if (!turn.contains(card) || found.has(card)) continue;
+          if (!scope.contains(card) || found.has(card)) continue;
           unmarkToolResultCard(card);
         }
       }
@@ -2528,7 +2626,7 @@
         : [];
       const turnStructureChanged = uniqueCandidates.some((el) => el.matches(TURN_SELECTOR));
       const scanHasTurn = isConversationTurnScoped(scanRoot) || Boolean(scanRoot.querySelector(TURN_SELECTOR));
-      if (state.settings.enabled && state.settings.hideToolSummary && scanHasTurn) {
+      if (state.settings.enabled && state.settings.hideToolSummary) {
         scanToolResultCards(scanRoot, latestTurnIndex);
       }
       // Mounted App/tool surfaces remain rendered to avoid lifecycle/template
@@ -3032,7 +3130,7 @@
         // “View lines …” / “View file …”) outside the legacy group/tool-message
         // summary shell. Classify those explicitly so they do not survive as
         // large black cards when summary chrome is hidden.
-        analysisTurns.forEach((turn) => scanToolResultCards(turn));
+        scanToolResultCards(document.body);
         // Recent-N owns the visual fate of old turns, so avoid spending Tool/App
         // analysis work inside turns that are already provisionally/finally folded.
         analysisTurns.forEach((turn) => scheduleHistoricalToolSummaryShellSweep(turn));
@@ -3282,7 +3380,8 @@
           state.summaryGenerationActive = nextActive;
           if (changed) {
             if (state.settings.hideToolSummary && !needsGeneralMutationScan()) refreshSummaryLiveObservation();
-            if (needsGeneralMutationScan()) scheduleScan();
+            if (state.settings.hideToolSummary && !nextActive) scheduleScan(document.body);
+            else if (needsGeneralMutationScan()) scheduleScan();
             if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
           }
           if (!state.summaryGenerationRoot?.isConnected) bindSummaryGenerationObserver();

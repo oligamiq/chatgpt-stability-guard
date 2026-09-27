@@ -23,10 +23,12 @@ def exchange(key, body):
 {body}<div class="markdown">answer {key}</div></div></div></div>'''
 
 
-def tool_card(card_id, action_id, action_text, extra=''):
+def tool_card(card_id, action_id, action_text, extra='', plain=False):
+    action = (f'<div id="{action_id}" class="tool-action"><span>View lines 3200–</span><span>3429 · content.js</span></div>'
+              if plain else f'<button id="{action_id}" type="button">{action_text}</button>')
     return f'''<div id="{card_id}" class="tool-result-fixture">
 <div class="tool-header"><span class="tool-icon"></span><span>xubuntu-desktop-commander</span><button aria-label="Expand tool card">⌄</button></div>
-<button id="{action_id}" type="button">{action_text}</button>{extra}</div>'''
+{action}{extra}</div>'''
 
 
 SETTINGS = '''Object.assign({},defaults.settings,{
@@ -47,18 +49,21 @@ window.chrome={{
 }};
 </script>
 <div id="composer-wrap"><form><textarea id="prompt-textarea"></textarea><button id="stop" data-testid="stop-button">Stop</button></form></div>
+<main id="main">
+<div id="turnless-card" class="tool-result-fixture"><div class="tool-header"><span>xubuntu-desktop-commander</span></div><div id="turnless-action"><span>View file · </span><span>manifest.json</span></div></div>
 <div id="thread">
-{exchange('ex-1', tool_card('old-card', 'old-action', 'View lines 1–1000 · content.js'))}
+{exchange('ex-1', tool_card('old-card', 'old-action', 'View lines 1–1000 · content.js', plain=True) + '<div id="flat-header" class="flat-tool-header">xubuntu-desktop-commander</div><div id="flat-action" class="flat-tool-action"><span>View lines 80–108 · README.md</span></div>')}
 {exchange('ex-2', '<div>middle answer</div>')}
 {exchange('ex-3', tool_card('live-card', 'live-action', 'View file · manifest.json') + tool_card('auth-card', 'auth-action', 'View file · private.json', '<button id="connect">Connect account</button>') + '<div class="markdown"><button id="markdown-view">View file · README.md</button></div>')}
 </div>
+</main>
 <script>{CONTENT_JS}</script>
 <script>
 const snap=(id)=>{{const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);return {{cls:[...e.classList],w:r.width,h:r.height,pos:s.position,opacity:s.opacity,pointer:s.pointerEvents}}}};
-setTimeout(()=>{{window.__beforeStop={{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view')}};}},350);
+setTimeout(()=>{{window.__beforeStop={{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}};}},350);
 setTimeout(()=>document.getElementById('stop')?.remove(),600);
 setTimeout(()=>{{
- const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{before:window.__beforeStop,after:{{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view')}}}});document.body.appendChild(out);
+ const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{before:window.__beforeStop,after:{{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}}}});document.body.appendChild(out);
 }},1700);
 </script></body></html>'''
 
@@ -83,11 +88,15 @@ def main():
     assert not hidden(result['before']['live']), result
     assert not hidden(result['before']['auth']), result
     assert not hidden(result['before']['markdown']), result
+    assert not hidden(result['before']['turnless']), result
+    assert hidden(result['before']['flatHeader']) and hidden(result['before']['flatAction']), result
     assert hidden(result['after']['old']), result
     assert hidden(result['after']['live']), result
     assert not hidden(result['after']['auth']), result
     assert not hidden(result['after']['markdown']), result
-    print('PASS tool-result-cards: View lines/file cards hide after generation; auth/markdown fail open')
+    assert hidden(result['after']['turnless']), result
+    assert hidden(result['after']['flatHeader']) and hidden(result['after']['flatAction']), result
+    print('PASS tool-result-cards: control/plain/turnless View lines/file cards hide after generation; auth/markdown fail open')
 
 
 if __name__ == '__main__':
