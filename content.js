@@ -813,9 +813,10 @@
       if (!(element instanceof Element)) return false;
       if (element.matches(APP_BOOTSTRAP_BUSY_SELECTOR) || element.querySelector(APP_BOOTSTRAP_BUSY_SELECTOR)) return true;
       if (element.closest('.markdown')) return false;
-      const uiShaped = element.matches('.no-scrollbar,.mt-2,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"]') ||
-        Boolean(element.querySelector('.no-scrollbar,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"]')) ||
-        element.nextElementSibling?.matches?.('.no-scrollbar') || element.previousElementSibling?.matches?.('.no-scrollbar');
+      const uiShaped = element.matches('.no-scrollbar,.mt-2,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-mcp-app-portal-target],[data-mcp-app-inline-surface],[data-mcp-app-frame]') ||
+        Boolean(element.querySelector('.no-scrollbar,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-mcp-app-portal-target],[data-mcp-app-inline-surface],[data-mcp-app-frame]')) ||
+        element.nextElementSibling?.matches?.('.no-scrollbar,[data-mcp-app-portal-target]') ||
+        element.previousElementSibling?.matches?.('.no-scrollbar,[data-mcp-app-portal-target]');
       if (!uiShaped) return false;
       return hasBootstrapBusyText(element);
     }
@@ -1334,6 +1335,7 @@
     const APP_SURFACE_SELECTOR = [
       'iframe', 'canvas', 'video', 'audio', 'table', 'picture', 'object', 'embed',
       '[data-testid*="app"]', '[data-testid*="widget"]', '[data-testid*="artifact"]',
+      '[data-mcp-app-portal-target]', '[data-mcp-app-inline-surface]', '[data-mcp-app-frame]',
       '[role="application"]', '[role="region"]', 'aside[class*="surface-error"]'
     ].join(',');
     const APP_SURFACE_SELF_SELECTOR = APP_SURFACE_SELECTOR;
@@ -1459,16 +1461,28 @@
         marker.closest('details') || marker;
     }
 
-    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"], .no-scrollbar iframe';
+    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"], .no-scrollbar iframe, [data-mcp-app-portal-target] iframe';
     // Older ChatGPT builds exposed MCP/App routes as ui://<tool>/<route> titles.
-    // Current authenticated builds may use a generic iframe title instead, so
-    // also recognize the same preview mount/header/divider structure. Keep
-    // ordinary iframes fail-open unless they are inside a conversation App mount.
+    // Current authenticated builds may use either a generic iframe title inside
+    // the legacy no-scrollbar mount or the newer data-mcp-app-* portal/frame DOM.
+    // Ordinary iframes still fail open unless they sit inside one of those known
+    // conversation App surfaces.
     const PREVIEW_TITLE_RE = /^ui:\/\/[^/?#]+(?:\/[^?#]*)?(?:[?#].*)?$/i;
     const PREVIEW_RETRY_RE = /(?:\bretry\b|再試行)/i;
 
+    function currentMcpAppPortalFor(iframe) {
+      if (!(iframe instanceof HTMLIFrameElement)) return null;
+      const portal = iframe.closest('[data-mcp-app-portal-target]');
+      if (!(portal instanceof Element) || !isConversationTurnScoped(portal) || portal.closest('.markdown')) return null;
+      const frame = iframe.closest('[data-mcp-app-frame]');
+      const inlineSurface = portal.querySelector('[data-mcp-app-inline-surface]');
+      if (!(frame instanceof Element) && !(inlineSurface instanceof Element)) return null;
+      return portal;
+    }
+
     function isPreviewSurfaceIframe(iframe) {
       if (!(iframe instanceof HTMLIFrameElement)) return false;
+      if (currentMcpAppPortalFor(iframe)) return true;
       if (PREVIEW_TITLE_RE.test(normalizeLabel(iframe.getAttribute('title')))) return true;
       const mount = iframe.closest('.no-scrollbar');
       if (!(mount instanceof Element) || !isConversationTurnScoped(mount) || mount.closest('.markdown')) return false;
@@ -1482,6 +1496,18 @@
 
     function previewSurfaceParts(iframe) {
       if (!isPreviewSurfaceIframe(iframe)) return null;
+      const mcpPortal = currentMcpAppPortalFor(iframe);
+      if (mcpPortal) {
+        const header = mcpPortal.previousElementSibling;
+        const sameCardHeader = header instanceof Element && header.parentElement === mcpPortal.parentElement &&
+          !header.closest('.markdown') ? header : null;
+        return {
+          mount: mcpPortal,
+          header: sameCardHeader,
+          divider: null,
+          kind: 'mcp-app'
+        };
+      }
       const mount = iframe.closest('.no-scrollbar');
       if (!(mount instanceof Element) || !isConversationTurnScoped(mount) || mount.closest('.markdown')) return null;
       const header = mount.previousElementSibling;
@@ -1490,8 +1516,32 @@
       return {
         mount,
         header: header instanceof Element ? header : null,
-        divider
+        divider,
+        kind: 'legacy'
       };
+    }
+
+    function mcpAppPortalReadyForHide(parts, iframe) {
+      if (!parts || parts.kind !== 'mcp-app') return true;
+      if (!(iframe instanceof HTMLIFrameElement) || !normalizeLabel(iframe.getAttribute('src'))) return false;
+      const frame = parts.mount.querySelector('[data-mcp-app-frame]');
+      const inlineSurface = parts.mount.querySelector('[data-mcp-app-inline-surface]');
+      if (!(frame instanceof Element) || !(inlineSurface instanceof Element)) return false;
+      if (inlineSurface.getAttribute('data-mcp-app-expanded') !== 'true') return false;
+      const frameRect = frame.getBoundingClientRect();
+      const inlineRect = inlineSurface.getBoundingClientRect();
+      return frameRect.width > 0 && frameRect.height > 0 && inlineRect.width > 0 && inlineRect.height > 0;
+    }
+
+    function mcpAppPortalMustStayVisible(parts, iframe, entry) {
+      if (!parts || parts.kind !== 'mcp-app') return false;
+      const latestTurnIndex = mountedLatestTurnIndex();
+      const protectedTurns = computeLiveProtectedTurns(latestTurnIndex);
+      if (isProtectedLiveToolTurn(parts.mount, latestTurnIndex, protectedTurns)) return true;
+      if (entry?.mcpReady) return false;
+      if (!mcpAppPortalReadyForHide(parts, iframe)) return true;
+      if (entry) entry.mcpReady = true;
+      return false;
     }
 
     function previewSiblingHasAppError(scope) {
@@ -1638,6 +1688,7 @@
 
     const previewResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
       const toClear = new Set();
+      const toRelease = new Map();
       const toHide = new Map();
       for (const resizeEntry of entries) {
         const target = resizeEntry.target;
@@ -1654,6 +1705,10 @@
           toClear.add(iframe);
           continue;
         }
+        if (mcpAppPortalMustStayVisible(parts, iframe, entry)) {
+          toRelease.set(iframe, { entry, parts });
+          continue;
+        }
         toHide.set(iframe, { entry, parts });
       }
       // Batch every geometry read before any class/style write. ResizeObserver can
@@ -1664,8 +1719,13 @@
         measured.set(iframe, item.parts.mount.getBoundingClientRect().width);
       }
       for (const iframe of toClear) clearPreviewSurface(iframe);
-      for (const [iframe, { entry, parts }] of toHide) {
+      for (const [iframe, { entry, parts }] of toRelease) {
         if (toClear.has(iframe)) continue;
+        releasePreviewPresentation(entry, parts);
+        schedulePreviewProbe(iframe);
+      }
+      for (const [iframe, { entry, parts }] of toHide) {
+        if (toClear.has(iframe) || toRelease.has(iframe)) continue;
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = 0;
         hidePreviewPresentation(entry, parts, 'hidden', measured.get(iframe));
@@ -1699,8 +1759,7 @@
 
     function schedulePreviewProbe(iframe, delay = 850) {
       const entry = state.previewSurfaces.get(iframe);
-      if (!entry) return;
-      clearTimeout(entry.timer);
+      if (!entry || entry.timer) return;
       entry.timer = setTimeout(() => {
         entry.timer = 0;
         probePreviewSurface(iframe);
@@ -1741,6 +1800,7 @@
         entry.mount = parts.mount;
         entry.header = parts.header;
         entry.divider = parts.divider;
+        entry.mcpReady = false;
         state.previewMounts.set(parts.mount, iframe);
         previewResizeObserver?.observe(parts.mount);
         parts.mount.classList.add('csg-preview-settling');
@@ -1750,6 +1810,15 @@
       }
       if (previewHasFailOpenUi(parts)) {
         clearPreviewSurface(iframe);
+        return;
+      }
+      if (mcpAppPortalMustStayVisible(parts, iframe, entry)) {
+        // Current data-mcp-app-* portals need a real measured box while the App
+        // is bootstrapping. Do not repeat the old Preparing-preview regression by
+        // collapsing the portal before generation has settled and ChatGPT has
+        // published a non-zero expanded inline surface/frame.
+        releasePreviewPresentation(entry, parts);
+        schedulePreviewProbe(iframe);
         return;
       }
       entry.probes += 1;
@@ -1766,7 +1835,7 @@
       if (!parts) return;
       let entry = state.previewSurfaces.get(iframe);
       if (!entry) {
-        entry = { mount: parts.mount, header: parts.header, divider: parts.divider, timer: 0, stableTiny: 0, probes: 0, brokenChecks: 0 };
+        entry = { mount: parts.mount, header: parts.header, divider: parts.divider, timer: 0, stableTiny: 0, probes: 0, brokenChecks: 0, mcpReady: false };
         state.previewSurfaces.set(iframe, entry);
         state.previewMounts.set(parts.mount, iframe);
         previewResizeObserver?.observe(iframe);

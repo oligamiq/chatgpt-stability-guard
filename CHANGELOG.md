@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.34 — 2026-09-27
+
+- Fixes current authenticated MCP App surfaces rendered through `data-mcp-app-portal-target` / `data-mcp-app-inline-surface` / `data-mcp-app-frame`; the surrounding `display: contents` wrapper could be 0x0 while its App children still rendered at full size.
+- Hides the actual MCP portal and adjacent App header only after the App is expanded/measurable and its exchange is no longer generating, while keeping Connect/Auth/bootstrap UI fail-open and the iframe mounted.
+- Added a production-shaped MCP portal regression and validated an authenticated live chat containing nine `desktop-commander-home` surfaces: all nine cards collapsed to 0x0 and disappeared in a captured live screenshot.
+
 ## 1.0.33 — 2026-09-27
 
 - Fixes the remaining authenticated Project/Work Tool rows visible in real screenshots: Tool result UI may live outside `[data-turn-key]` exchange roots, so a turn-only scan could never see it.
