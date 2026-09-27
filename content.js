@@ -771,8 +771,8 @@
     }
 
     const APP_BOOTSTRAP_BUSY_SELECTOR = '[role="progressbar"],[aria-busy="true"]';
-    const APP_BOOTSTRAP_BUSY_TEXT_RE = /(?:loading|fetching|initializing|analyzing)\s+(?:app|template|image)|(?:app|template)\s+(?:loading|initializing)|アプリ[^。]{0,24}(?:読み込|ロード)|テンプレート[^。]{0,24}(?:取得|読み込)|画像[^。]{0,24}(?:解析|分析)/i;
-    const APP_BOOTSTRAP_BUSY_COMPACT_RE = /(?:loading|fetching|initializing|analyzing)(?:app|template|image)|(?:app|template)(?:loading|initializing)|アプリ.{0,24}(?:読み込|ロード)|テンプレート.{0,24}(?:取得|読み込)|画像.{0,24}(?:解析|分析)/i;
+    const APP_BOOTSTRAP_BUSY_TEXT_RE = /(?:loading|fetching|initializing|analyzing|preparing)\s+(?:app|template|image|preview)|(?:app|template|preview)\s+(?:loading|initializing|preparing)|アプリ[^。]{0,24}(?:読み込|ロード|準備)|テンプレート[^。]{0,24}(?:取得|読み込|準備)|プレビュー[^。]{0,24}(?:準備|読み込|ロード)|画像[^。]{0,24}(?:解析|分析|準備)/i;
+    const APP_BOOTSTRAP_BUSY_COMPACT_RE = /(?:loading|fetching|initializing|analyzing|preparing)(?:app|template|image|preview)|(?:app|template|preview)(?:loading|initializing|preparing)|アプリ.{0,24}(?:読み込|ロード|準備)|テンプレート.{0,24}(?:取得|読み込|準備)|プレビュー.{0,24}(?:準備|読み込|ロード)|画像.{0,24}(?:解析|分析|準備)/i;
 
     function hasBootstrapBusyText(element) {
       const walker = document.createTreeWalker(
@@ -1336,6 +1336,44 @@
       '[role="application"]', '[role="region"]', 'aside[class*="surface-error"]'
     ].join(',');
     const APP_SURFACE_SELF_SELECTOR = APP_SURFACE_SELECTOR;
+    const TOOL_EMBED_FAIL_OPEN_RE = /(?:\b(?:connect|authori[sz]e|authenticate|sign\s*in|log\s*in|retry|add\s+(?:account|connector|plugin|source))\b|接続|認証|ログイン|連携|再試行)/i;
+    const TOOL_EMBED_FORM_SELECTOR = 'select,input:not([type="hidden"]),textarea,[role="switch"],[role="slider"],[role="checkbox"],[role="radio"],[role="combobox"]';
+    const TOOL_EMBED_HOST_SELECTOR = '[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[role="application"]';
+    const TOOL_EMBED_STANDALONE_SELECTOR = '[role="region"],[role="application"],[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"]';
+
+    function richToolEmbedShell(shell) {
+      if (!(shell instanceof Element) || !isConversationTurnScoped(shell) || shell.closest('.markdown')) return false;
+      const structuralHost = shell.matches(TOOL_EMBED_HOST_SELECTOR);
+      const standaloneSurface = shell.matches(TOOL_EMBED_STANDALONE_SELECTOR) && Boolean(shell.querySelector(TOOL_EMBED_FORM_SELECTOR));
+      if (!structuralHost && !standaloneSurface) return false;
+      if (isProtectedLiveToolTurn(shell) || hasActiveAppBootstrapUi(shell)) return false;
+      if (shell.querySelector('aside[class*="surface-error"],.text-token-text-error')) return false;
+      const controls = [];
+      if (shell.matches(ACTIONABLE_UI_SELECTOR)) controls.push(shell);
+      controls.push(...shell.querySelectorAll(ACTIONABLE_UI_SELECTOR));
+      if (controls.some((control) => TOOL_EMBED_FAIL_OPEN_RE.test(boundedControlLabel(control, 181)))) return false;
+      const formControls = shell.querySelectorAll(TOOL_EMBED_FORM_SELECTOR);
+      if (formControls.length < 2 && controls.some((control) => /(?:enable\s+account|account\s+(?:access|setting)|アカウント)/i.test(boundedControlLabel(control, 181)))) return false;
+      if (shell.querySelector('.no-scrollbar,[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[role="application"]')) return true;
+      if (shell.querySelector('[role="region"]') && formControls.length >= 2) return true;
+      return false;
+    }
+
+    function refreshRichToolEmbedShell(shell) {
+      if (!(shell instanceof Element)) return;
+      const hide = Boolean(state.settings.enabled && state.settings.hideToolEmbeds && richToolEmbedShell(shell));
+      shell.classList.toggle('csg-tool-embed-ui', hide);
+    }
+
+    function refreshRichToolEmbedShells(scanRoot) {
+      if (!(scanRoot instanceof Element)) return;
+      const shells = new Set();
+      const own = scanRoot.closest?.(TOOL_EMBED_HOST_SELECTOR);
+      if (own instanceof Element) shells.add(own);
+      if (scanRoot.matches?.(TOOL_EMBED_HOST_SELECTOR) || scanRoot.matches?.(TOOL_EMBED_STANDALONE_SELECTOR)) shells.add(scanRoot);
+      scanRoot.querySelectorAll?.(`${TOOL_EMBED_HOST_SELECTOR},${TOOL_EMBED_STANDALONE_SELECTOR}`).forEach((shell) => shells.add(shell));
+      shells.forEach(refreshRichToolEmbedShell);
+    }
 
     function isToolSummaryDecoration(media, shell) {
       if (!(media instanceof Element) || !(shell instanceof Element)) return false;
@@ -1420,17 +1458,25 @@
         marker.closest('details') || marker;
     }
 
-    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"]';
-    // ChatGPT tool rich UI uses ui://<tool>/<route> titles. Do not key hiding to
-    // route names such as file-preview: config-editor and future tool routes use
-    // the same mount/header/divider structure and are also covered by
-    // hideToolEmbeds. Ordinary iframes without a ui:// title still fail open.
+    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"], .no-scrollbar iframe';
+    // Older ChatGPT builds exposed MCP/App routes as ui://<tool>/<route> titles.
+    // Current authenticated builds may use a generic iframe title instead, so
+    // also recognize the same preview mount/header/divider structure. Keep
+    // ordinary iframes fail-open unless they are inside a conversation App mount.
     const PREVIEW_TITLE_RE = /^ui:\/\/[^/?#]+(?:\/[^?#]*)?(?:[?#].*)?$/i;
     const PREVIEW_RETRY_RE = /(?:\bretry\b|再試行)/i;
 
     function isPreviewSurfaceIframe(iframe) {
       if (!(iframe instanceof HTMLIFrameElement)) return false;
-      return PREVIEW_TITLE_RE.test(normalizeLabel(iframe.getAttribute('title')));
+      if (PREVIEW_TITLE_RE.test(normalizeLabel(iframe.getAttribute('title')))) return true;
+      const mount = iframe.closest('.no-scrollbar');
+      if (!(mount instanceof Element) || !isConversationTurnScoped(mount) || mount.closest('.markdown')) return false;
+      if (iframe.closest('[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[class~="group/tool-message"]')) return true;
+      const header = mount.previousElementSibling;
+      const divider = mount.nextElementSibling;
+      const structuralHeader = header instanceof Element &&
+        (header.classList.contains('mt-2') || header.classList.contains('sm:mt-4'));
+      return Boolean(structuralHeader && divider instanceof Element && divider.matches('.h-px'));
     }
 
     function previewSurfaceParts(iframe) {
@@ -1732,6 +1778,7 @@
       if (!state.settings.enabled || !state.settings.hideToolEmbeds) return;
       const rootElement = scanRoot instanceof Element ? scanRoot : scanRoot?.parentElement;
       if (!(rootElement instanceof Element) || isRecentAnalysisSuppressed(rootElement)) return;
+      refreshRichToolEmbedShells(rootElement);
       if (rootElement.matches(PREVIEW_IFRAME_SELECTOR)) trackPreviewIframe(rootElement);
       rootElement.querySelectorAll?.(PREVIEW_IFRAME_SELECTOR).forEach(trackPreviewIframe);
       const mount = rootElement.closest?.('.no-scrollbar');
@@ -1752,6 +1799,7 @@
 
     function clearAllPreviewSurfaces() {
       for (const iframe of [...state.previewSurfaces.keys()]) clearPreviewSurface(iframe);
+      document.querySelectorAll?.('.csg-tool-embed-ui').forEach((shell) => shell.classList.remove('csg-tool-embed-ui'));
     }
 
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.31 — 2026-09-27
+
+- Suppresses current ChatGPT Tool/App cards rendered directly in conversation DOM, not only iframe-backed previews, including settings-style cards with multiple form controls.
+- Keeps rich Tool/App UI measurable while generation/bootstrap is active, then removes settled passive cards from layout; Connect/Auth/Retry and single actionable controls continue to fail open.
+- Added regression coverage for current DOM-style Tool settings cards, legacy Tool/App shells, authenticated generation boundaries, and action-safe behavior.
+
+## 1.0.30 — 2026-09-27
+
+- Fixed current ChatGPT rich Tool/App previews getting stuck at `Preparing preview...` by treating preparing-preview/app states as active bootstrap UI until initialization clears.
+- Restored rich-UI suppression for authenticated ChatGPT builds that use generic iframe titles instead of legacy `ui://...` titles by recognizing the same conversation preview mount/header/divider structure.
+- Added regression coverage for the full `Preparing preview...` → ready → hidden lifecycle using a generic `xubuntu-desktop-commander` iframe title while retaining the legacy `ui://` route coverage.
+
 ## 1.0.28 — 2026-09-26
 
 - Restored compatibility with ChatGPT's authenticated conversation DOM by treating current `[data-turn-key]` exchange roots as first-class conversation items alongside legacy `conversation-turn-*` articles across Recent-N discovery, per-chat toggles, pre-hide/loading state, mutation compaction, and action scoping.

@@ -172,6 +172,12 @@ body{{font:16px sans-serif;padding:20px}} button{{margin:4px;padding:8px}}
     <div id="config-card-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Configurator">Configurator</span></div>
     <div id="config-card" class="no-scrollbar"><div style="height:240px"><iframe id="config-card-frame" title="ui://other-tool/config-editor?mode=test" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
     <div id="config-card-divider" class="bg-token-border-default my-3 h-px w-full"></div>
+    <span id="dom-rich-tool-shell" class="group/tool-message"><span class="block"><button type="button" aria-label="Open tool call list"></button><span>Called tool</span></span><div id="dom-rich-tool-card" role="region"><label>Default Shell<select id="dom-rich-shell-select"><option>/bin/bash</option></select></label><label>Anonymous Telemetry<span id="dom-rich-toggle" role="switch" tabindex="0">On</span></label><label>File Read Limit<input id="dom-rich-read-limit" value="1000"></label></div></span>
+    <div id="current-dom-tool-app" data-testid="tool-ui-current"><div role="region"><label>Default Shell<select><option>/bin/bash</option></select></label><label>File Write Limit<input value="50"></label></div></div>
+    <span id="dom-auth-tool-shell" class="group/tool-message"><span class="block"><button type="button" aria-label="Open tool call list"></button><span>Called tool</span></span><div role="region"><button id="dom-auth-connect">Connect account</button></div></span>
+    <div id="preparing-preview-header" class="mt-2 sm:mt-4">Preparing preview...</div>
+    <div id="preparing-preview" class="no-scrollbar"><div style="height:120px"><iframe id="preparing-preview-frame" title="xubuntu-desktop-commander" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
+    <div id="preparing-preview-divider" class="bg-token-border-default my-3 h-px w-full"></div>
     <div id="message-timeout-preview-header" class="mt-2 sm:mt-4"><span role="button"><img alt="Previewer">Previewer</span></div>
     <div id="message-timeout-preview" class="no-scrollbar"><div style="height:240px"><iframe id="message-timeout-preview-frame" title="ui://other-tool/file-preview" src="about:blank" style="width:100%;height:100%"></iframe></div></div>
     <div id="message-timeout-preview-divider" class="bg-token-border-default my-3 h-px w-full"></div>
@@ -572,6 +578,8 @@ setTimeout(() => {{
     busyTransitionWasHidden:window.__busyTransitionInitiallyHidden===true,
     busyTransitionReleased:!snapshot('busy-transition-placeholder').classes.includes('csg-prehide-tool-block') && snapshot('busy-transition-placeholder').display!=='none' && snapshot('busy-transition-placeholder-header').display!=='none',
     embedRecoverLoadingVisible:!snapshot('embed-recover').classes.includes('csg-tool-embed') && physicallyRendered('embed-recover'),
+    preparingPreviewVisible:!snapshot('preparing-preview').classes.some(c=>c.startsWith('csg-preview')) &&
+      snapshot('preparing-preview').position!=='absolute' && physicallyRendered('preparing-preview') && physicallyRendered('preparing-preview-header'),
     livePreNative:!snapshot('live-pre').classes.includes('csg-heavy') && snapshot('live-pre').contentVisibility!=='auto' && physicallyRendered('live-pre'),
     shell:physicallyRendered('live-shell'),
     summaryGone:summaryGone('live-tool-summary'),
@@ -701,6 +709,7 @@ setTimeout(() => {{
   const busyHeader=document.getElementById('busy-transition-placeholder-header');
   busyHeader.removeAttribute('role');
   busyHeader.textContent='Ready';
+  document.getElementById('preparing-preview-header').textContent='Ready';
 }}, 800);
 setTimeout(() => {{
   document.getElementById('recover-details-connect')?.remove();
@@ -753,7 +762,8 @@ setTimeout(() => {{
     weirdShellSettled:snapshot('live-weird-app-shell').classes.includes('csg-tool-ui') && snapshot('live-weird-app-shell').display!=='none',
     bootstrapDetailsPreserved:!snapshot('live-bootstrap-details').classes.includes('csg-tool-ui') && document.getElementById('live-bootstrap-details').open && physicallyRendered('live-bootstrap-details-loader') && summaryGone('live-bootstrap-details-summary'),
     appShellNotToolUi:!snapshot('live-app-shell').classes.includes('csg-tool-ui'),
-    appShellRendered:physicallyRendered('live-app-shell'),
+    appShellSuppressedAfterGeneration:snapshot('live-app-shell').classes.includes('csg-tool-embed-ui') &&
+      snapshot('live-app-shell').position==='absolute' && zeroRect('live-app-shell'),
     appShellSummaryGone:summaryGone('live-app-summary'),
     interactiveShell:!snapshot('live-interactive-shell').classes.includes('csg-tool-ui') && physicallyRendered('live-interactive-shell'),
     interactiveSummaryGone:summaryGone('live-interactive-summary'),
@@ -862,7 +872,7 @@ setTimeout(() => {{
   const states={{}};
   for (const id of ['connector','library','outside-pre','old-classless-summary','old-classless-body','old-fragmented-en-summary','old-fragmented-en-body','long-old-summary','long-old-body','passive-tool','interactive-tool','tool-with-markdown-controls','tool-with-auth-link',
     'tool-with-aria-action','dynamic-input-tool','fragmented-bootstrap-tool','passive-thinking','interactive-thinking','dynamic-tool','tool-with-iframe-surface','tool-with-markdown-iframe','tool-with-image-surface','tool-with-svg-surface','tool-bootstrap-text-false-positive','markdown-loading-pre','interactive-heavy-pre','passive-shell','aria-only-shell','aria-only-summary','retry-summary-shell','summary-retry','partial-summary-shell','partial-summary-button','interactive-shell','passive-details',
-    'interactive-details','dynamic-details','recover-details','surface-error-placeholder','root-surface-error-placeholder','embed-passive','embed-app','config-card-header','config-card','config-card-frame','config-card-divider','message-timeout-preview-header','message-timeout-preview','message-timeout-preview-frame','message-timeout-preview-divider','message-delivery-error','message-delivery-retry','preview-broken-header','preview-broken','preview-broken-frame','preview-broken-divider','preview-percent-header','preview-percent','preview-percent-frame','preview-percent-divider','preview-sibling-guard-header','preview-sibling-guard','preview-sibling-guard-frame','preview-sibling-guard-divider','preview-unrelated-tool','preview-unrelated-connect','preview-action-sibling-header','preview-action-sibling','preview-action-sibling-frame','preview-action-sibling-divider','preview-action-card','preview-action-connect','preview-replace-header','preview-replace-new','preview-replace-frame','preview-replace-divider','preview-iframe-replace-header','preview-iframe-replace','preview-iframe-replace-new','preview-iframe-replace-divider','preview-full-replace-header-new','preview-full-replace-new','preview-full-replace-new-frame','preview-full-replace-divider','preview-success-header','preview-success','preview-success-frame','preview-success-divider','preview-late-grow-header','preview-late-grow','preview-late-grow-frame','preview-late-grow-divider','preview-shrink-header','preview-shrink','preview-shrink-frame','preview-shrink-divider','preview-error-header','preview-error','preview-error-frame','preview-error-surface','embed-action','embed-trigger-action','embed-trigger-action-control','embed-dynamic','embed-text-dynamic','placeholder-passive',
+    'interactive-details','dynamic-details','recover-details','surface-error-placeholder','root-surface-error-placeholder','embed-passive','embed-app','config-card-header','config-card','config-card-frame','config-card-divider','dom-rich-tool-shell','dom-rich-tool-card','current-dom-tool-app','dom-auth-tool-shell','dom-auth-connect','preparing-preview-header','preparing-preview','preparing-preview-frame','preparing-preview-divider','message-timeout-preview-header','message-timeout-preview','message-timeout-preview-frame','message-timeout-preview-divider','message-delivery-error','message-delivery-retry','preview-broken-header','preview-broken','preview-broken-frame','preview-broken-divider','preview-percent-header','preview-percent','preview-percent-frame','preview-percent-divider','preview-sibling-guard-header','preview-sibling-guard','preview-sibling-guard-frame','preview-sibling-guard-divider','preview-unrelated-tool','preview-unrelated-connect','preview-action-sibling-header','preview-action-sibling','preview-action-sibling-frame','preview-action-sibling-divider','preview-action-card','preview-action-connect','preview-replace-header','preview-replace-new','preview-replace-frame','preview-replace-divider','preview-iframe-replace-header','preview-iframe-replace','preview-iframe-replace-new','preview-iframe-replace-divider','preview-full-replace-header-new','preview-full-replace-new','preview-full-replace-new-frame','preview-full-replace-divider','preview-success-header','preview-success','preview-success-frame','preview-success-divider','preview-late-grow-header','preview-late-grow','preview-late-grow-frame','preview-late-grow-divider','preview-shrink-header','preview-shrink','preview-shrink-frame','preview-shrink-divider','preview-error-header','preview-error','preview-error-frame','preview-error-surface','embed-action','embed-trigger-action','embed-trigger-action-control','embed-dynamic','embed-text-dynamic','placeholder-passive',
     'placeholder-action','placeholder-header-action','placeholder-header-body','dynamic-placeholder','dynamic-header-placeholder-header',
     'dynamic-header-placeholder-body','reuse-passive-tool','live-tool','live-pre','live-shell','live-tool-summary','live-shell-body','live-interactive-shell',
     'live-interactive-summary','live-shell-connect','live-interactive-body','live-embed','live-placeholder','live-app-error','live-app-motion','real-called-tool-play-shell','real-called-tool-play','classless-label-app-media','classless-label-app-svg',
@@ -913,6 +923,14 @@ setTimeout(() => {{
     rootSurfaceErrorPlaceholderVisible: !states['root-surface-error-placeholder'].classes.includes('csg-prehide-tool-block') && physicallyRendered('root-surface-error-placeholder'),
     passiveLegacyEmbedPreserved: !states['embed-passive'].classes.includes('csg-tool-embed') && states['embed-passive'].display!=='none',
     appIframeEmbedVisible: !states['embed-app'].classes.includes('csg-tool-embed') && states['embed-app'].display!=='none' && physicallyRendered('embed-app-frame'),
+    domRichToolAppSuppressed: states['dom-rich-tool-shell'].classes.includes('csg-tool-embed-ui') &&
+      states['dom-rich-tool-shell'].position==='absolute' && states['dom-rich-tool-shell'].opacity==='0' &&
+      states['dom-rich-tool-shell'].width===0 && states['dom-rich-tool-shell'].height===0,
+    currentDomToolAppSuppressed: states['current-dom-tool-app'].classes.includes('csg-tool-embed-ui') &&
+      states['current-dom-tool-app'].position==='absolute' && states['current-dom-tool-app'].opacity==='0' &&
+      states['current-dom-tool-app'].width===0 && states['current-dom-tool-app'].height===0,
+    domAuthToolAppFailsOpen: !states['dom-auth-tool-shell'].classes.includes('csg-tool-embed-ui') &&
+      states['dom-auth-tool-shell'].position!=='absolute' && physicallyRendered('dom-auth-connect'),
     uiRouteConfigCardSuppressed: states['config-card'].previewState==='hidden' &&
       states['config-card-header'].previewState==='hidden' &&
       states['config-card'].position==='absolute' && states['config-card'].opacity==='0' &&
@@ -920,6 +938,12 @@ setTimeout(() => {{
       states['config-card-header'].width===0 && states['config-card-header'].height===0 &&
       states['config-card-divider'].previewDivider==='hidden' && states['config-card-divider'].display==='none' &&
       document.getElementById('config-card-frame').isConnected,
+    preparingPreviewProtectedThenSuppressed: window.__liveBeforeAge?.preparingPreviewVisible===true &&
+      states['preparing-preview'].previewState==='hidden' && states['preparing-preview-header'].previewState==='hidden' &&
+      states['preparing-preview'].position==='absolute' && states['preparing-preview'].opacity==='0' &&
+      states['preparing-preview'].width===0 && states['preparing-preview'].height===0 &&
+      states['preparing-preview-divider'].previewDivider==='hidden' && states['preparing-preview-divider'].display==='none' &&
+      document.getElementById('preparing-preview-frame').isConnected,
     messageDeliveryRetryDoesNotFailOpenPreview: states['message-timeout-preview'].previewState==='hidden' &&
       states['message-timeout-preview-header'].previewState==='hidden' &&
       states['message-timeout-preview'].position==='absolute' && states['message-timeout-preview'].opacity==='0' &&

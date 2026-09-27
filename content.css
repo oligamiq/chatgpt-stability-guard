@@ -135,6 +135,24 @@ html.csg-hide-tool-summary .csg-tool-summary button:is(
   line-height: 0 !important;
 }
 
+/* Current ChatGPT can render rich Tool/App UI directly inside a tool-message
+   shell instead of an iframe. Once generation/bootstrap has settled, remove that
+   passive shell from flow while keeping the React-owned DOM mounted. */
+html.csg-hide-tool-embeds .csg-tool-embed-ui {
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* Passive Tool/App previews stay mounted for ChatGPT/React but are removed from
    conversation layout when hideToolEmbeds is enabled. Bootstrap/error/action UI
    fails open in JS, so users never lose Retry/Auth/Connect controls. */
