@@ -63,6 +63,27 @@ html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
   pointer-events: none !important;
 }
 
+
+/* Current ChatGPT can render a completed tool invocation/result as its own card
+   (for example a tool-name header followed by “View lines …” or “View file …”)
+   outside the legacy group/tool-message shell. Keep React ownership intact but
+   remove the settled result card from conversation layout. */
+html.csg-hide-tool-summary .csg-tool-result-card {
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* While a reply is still generating, keep summary-only shells out of flow but
    measurable. An App that reuses the same React-owned shell can then read a real
    parent width/auto height during its first layout effect; the next mutation

@@ -31,6 +31,7 @@ def main():
     run(sys.executable, 'scripts/test_recent_analysis_skip.py')
     run(sys.executable, 'scripts/test_auto_continue.py')
     run(sys.executable, 'scripts/test_authenticated_tool_boundary.py')
+    run(sys.executable, 'scripts/test_tool_result_cards.py')
     run(sys.executable, 'scripts/test_ui_isolation.py')
     run(sys.executable, 'scripts/test_generation_completion.py')
     run(sys.executable, 'scripts/test_summary_generation_completion.py')

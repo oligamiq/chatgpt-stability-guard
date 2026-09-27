@@ -49,6 +49,7 @@
       toolSummaryMarkers: new Set(),
       toolSummaryStealthMarkers: new Set(),
       toolSummaryLiveMarkers: new Set(),
+      toolResultCards: new Set(),
       toolSummaryInitialSweepQueued: new WeakSet(),
       toolSummaryFallbackSweepPending: new WeakSet(),
       toolSummaryFallbackSweepCursor: new WeakMap(),
@@ -1803,6 +1804,106 @@
     }
 
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';
+    const TOOL_RESULT_CARD_CONTROL_SELECTOR = 'button,[role="button"],[aria-expanded],a[href]';
+    const TOOL_RESULT_CARD_ACTION_RE = /^(?:View\s+(?:lines?\s+\d+(?:\s*[-–—]\s*\d+)?|file)\s*(?:[·•]\s*.+)?|(?:行|ファイル)[^。\n]{0,120}(?:表示|開く|見る))$/i;
+
+    function toolResultActionLabel(control) {
+      if (!(control instanceof Element) || control.closest('.markdown')) return '';
+      const labels = [
+        boundedElementText(control, 281, 32),
+        boundedControlLabel(control, 281)
+      ];
+      return labels.find((label) => label && label.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(label)) || '';
+    }
+
+    function hasToolResultFailOpenAction(shell, resultControl) {
+      if (!(shell instanceof Element)) return true;
+      const controls = [];
+      if (shell.matches(ACTIONABLE_UI_SELECTOR)) controls.push(shell);
+      controls.push(...shell.querySelectorAll(ACTIONABLE_UI_SELECTOR));
+      return controls.some((control) => {
+        if (control === resultControl || resultControl?.contains(control) || control.contains(resultControl)) return false;
+        const label = boundedControlLabel(control, 181);
+        return Boolean(label && ACTION_LINK_LABEL_RE.test(label));
+      });
+    }
+
+    function toolResultCardShellFor(control, latestTurnIndex = mountedLatestTurnIndex(), protectedTurns = computeLiveProtectedTurns(latestTurnIndex)) {
+      if (!(control instanceof Element) || control.closest('.markdown')) return null;
+      const actionLabel = toolResultActionLabel(control);
+      if (!actionLabel) return null;
+      const turn = control.closest(TURN_SELECTOR);
+      if (!(turn instanceof Element) || isProtectedLiveToolTurn(control, latestTurnIndex, protectedTurns)) return null;
+
+      let branch = control;
+      for (let depth = 0; depth < 7; depth += 1) {
+        const parent = branch.parentElement;
+        if (!(parent instanceof Element) || parent === turn || parent.closest('.markdown')) break;
+        if (parent.matches('[data-chatgpt-search-message-ids],[data-message-author-role="assistant"]')) break;
+        const parentText = boundedElementText(parent, 901, 64);
+        if (!parentText || parentText.length > 900) break;
+
+        let headerLikeSibling = false;
+        for (const child of parent.children) {
+          if (child === branch || child.contains(control)) continue;
+          if (child.matches('.markdown,.sr-only') || child.querySelector?.('.markdown')) continue;
+          const label = boundedElementText(child, 181, 24);
+          if (!label || label.length > 180 || TOOL_RESULT_CARD_ACTION_RE.test(label)) continue;
+          headerLikeSibling = true;
+          break;
+        }
+        if (headerLikeSibling && !hasToolResultFailOpenAction(parent, control)) return parent;
+        branch = parent;
+      }
+      return null;
+    }
+
+    function markToolResultCard(card) {
+      if (!(card instanceof Element)) return;
+      card.classList.add('csg-tool-result-card');
+      state.toolResultCards.add(card);
+    }
+
+    function unmarkToolResultCard(card) {
+      if (!(card instanceof Element)) return;
+      card.classList.remove('csg-tool-result-card');
+      state.toolResultCards.delete(card);
+    }
+
+    function scanToolResultCards(scanRoot, latestTurnIndex = mountedLatestTurnIndex()) {
+      if (!(scanRoot instanceof Element) || !state.settings.enabled || !state.settings.hideToolSummary) return;
+      const roots = [];
+      if (scanRoot.matches(TURN_SELECTOR)) roots.push(scanRoot);
+      else {
+        const containingTurn = scanRoot.closest(TURN_SELECTOR);
+        if (containingTurn) roots.push(containingTurn);
+        else roots.push(...scanRoot.querySelectorAll(TURN_SELECTOR));
+      }
+      const protectedTurns = computeLiveProtectedTurns(latestTurnIndex);
+      for (const turn of roots) {
+        if (!(turn instanceof Element) || isRecentAnalysisSuppressed(turn)) continue;
+        const found = new Set();
+        const controls = [];
+        if (turn.matches(TOOL_RESULT_CARD_CONTROL_SELECTOR)) controls.push(turn);
+        controls.push(...turn.querySelectorAll(TOOL_RESULT_CARD_CONTROL_SELECTOR));
+        for (const control of controls) {
+          if (!toolResultActionLabel(control)) continue;
+          const card = toolResultCardShellFor(control, latestTurnIndex, protectedTurns);
+          if (card) {
+            found.add(card);
+            markToolResultCard(card);
+          }
+        }
+        for (const card of [...state.toolResultCards]) {
+          if (!card.isConnected) {
+            state.toolResultCards.delete(card);
+            continue;
+          }
+          if (!turn.contains(card) || found.has(card)) continue;
+          unmarkToolResultCard(card);
+        }
+      }
+    }
 
     function boundedToolSummaryLabel(element, maxChars = 181) {
       if (!(element instanceof Element)) return '';
@@ -2427,6 +2528,9 @@
         : [];
       const turnStructureChanged = uniqueCandidates.some((el) => el.matches(TURN_SELECTOR));
       const scanHasTurn = isConversationTurnScoped(scanRoot) || Boolean(scanRoot.querySelector(TURN_SELECTOR));
+      if (state.settings.enabled && state.settings.hideToolSummary && scanHasTurn) {
+        scanToolResultCards(scanRoot, latestTurnIndex);
+      }
       // Mounted App/tool surfaces remain rendered to avoid lifecycle/template
       // failures. Only confirmed broken preview surfaces are visually suppressed.
       const toolCandidates = [];
@@ -2882,6 +2986,8 @@
         state.toolSummaryMarkers.clear();
         state.toolSummaryStealthMarkers.clear();
         state.toolSummaryLiveMarkers.clear();
+        for (const card of [...state.toolResultCards]) unmarkToolResultCard(card);
+        state.toolResultCards.clear();
         for (const root of state.toolSummaryPendingRoots) state.pendingRoots.delete(root);
         state.toolSummaryPendingRoots.clear();
         // A later re-enable on the same React DOM must be allowed to perform a
@@ -2922,6 +3028,11 @@
         else scanPreviewSurfaces(document.body);
       }
       if (state.settings.hideToolSummary) {
+        // Current ChatGPT also renders completed tool-result cards (for example
+        // “View lines …” / “View file …”) outside the legacy group/tool-message
+        // summary shell. Classify those explicitly so they do not survive as
+        // large black cards when summary chrome is hidden.
+        analysisTurns.forEach((turn) => scanToolResultCards(turn));
         // Recent-N owns the visual fate of old turns, so avoid spending Tool/App
         // analysis work inside turns that are already provisionally/finally folded.
         analysisTurns.forEach((turn) => scheduleHistoricalToolSummaryShellSweep(turn));
@@ -2973,7 +3084,8 @@
             ...state.textToolShells,
             ...[...state.toolSummaryMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
             ...[...state.toolSummaryStealthMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
-            ...[...state.toolSummaryLiveMarkers].filter((marker) => !marker.closest('.csg-tool-ui'))
+            ...[...state.toolSummaryLiveMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
+            ...state.toolResultCards
           ].filter((el) => el.isConnected && outsideHiddenTrace(el)).length : 0;
       const hiddenToolEmbeds = enabled && state.settings.hideToolEmbeds
         ? [...state.previewSurfaces.values()].filter((entry) =>
@@ -3222,7 +3334,7 @@
       let removed = false;
       let conversationTurnChanged = false;
       let generationStateChanged = false;
-      const classifiedSelector = '.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live';
+      const classifiedSelector = '.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live, .csg-tool-result-card';
 
       // Summary mutations are fed into a bounded idle queue. Never process
       // every added React node synchronously in one observer callback.

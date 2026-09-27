@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.32 — 2026-09-27
+
+- Hides current ChatGPT standalone Tool result cards such as `xubuntu-desktop-commander` rows followed by `View lines …` / `View file …`; these cards are rendered outside the legacy `group/tool-message` summary shell and survived 1.0.31.
+- Keeps the newest Tool result cards visible while generation is active, then removes them from layout at completion; Connect/Auth/Retry controls and lookalike text inside normal markdown fail open.
+- Added a production-shaped regression covering old/live authenticated exchanges, `View lines` and `View file` cards, generation completion, auth fail-open, and markdown false positives.
+
 ## 1.0.31 — 2026-09-27
 
 - Suppresses current ChatGPT Tool/App cards rendered directly in conversation DOM, not only iframe-backed previews, including settings-style cards with multiple form controls.
