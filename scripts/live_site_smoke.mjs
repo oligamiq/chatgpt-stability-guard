@@ -10,7 +10,10 @@ const ARTIFACT_DIR = path.join(ROOT, 'artifacts');
 const DEFAULT_URL = 'https://chatgpt.com/share/6a71b843-4fcc-83eb-8eb5-42706097b7e0';
 const TARGET_URL = process.env.CSG_LIVE_CHAT_URL || DEFAULT_URL;
 const TEST_MODE = process.env.CSG_LIVE_SMOKE_TEST_MODE === '1';
-const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+const LEGACY_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+const EXCHANGE_TURN_SELECTOR = '[data-turn-key]';
+const TURN_SELECTOR = `${LEGACY_TURN_SELECTOR},${EXCHANGE_TURN_SELECTOR}`;
+const ROOT_WAIT_TIMEOUT_MS = TEST_MODE ? Number(process.env.CSG_LIVE_SMOKE_ROOT_TIMEOUT_MS || 4000) : 20000;
 
 class CompatibilityFailure extends Error {
   constructor(message, cause) {
@@ -46,6 +49,14 @@ async function stopChild(child) {
     new Promise(resolve => child.once('exit', resolve)),
     sleep(700),
   ]);
+}
+
+function cleanupProfile(profile) {
+  try {
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
+  } catch (error) {
+    console.warn(`WARN live-site smoke could not remove temporary Chrome profile: ${error?.message || error}`);
+  }
 }
 
 class CdpClient {
@@ -173,7 +184,7 @@ async function launchChrome(url) {
     });
   } catch (error) {
     await stopChild(child);
-    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+    cleanupProfile(profile);
     throw error;
   }
 
@@ -188,7 +199,7 @@ async function pageTarget(browserWs) {
       const targets = await (await fetch(endpoint)).json();
       return targets.find(target => {
         if (target.type !== 'page' || !target.webSocketDebuggerUrl) return false;
-        if (TEST_MODE) return target.url.includes('/share/');
+        if (TEST_MODE) return target.url === TARGET_URL || target.url.startsWith(TARGET_URL);
         return target.url.startsWith('https://chatgpt.com/share/');
       }) || null;
     } catch {
@@ -242,10 +253,19 @@ async function injectScript(cdp, source, label) {
 async function snapshot(cdp) {
   return cdp.evaluate(`(() => {
     const root = document.documentElement;
+    const body = document.body;
+    const bodyText = String(body?.innerText || '').slice(0, 1200).toLowerCase();
+    const title = String(document.title || '').toLowerCase();
+    const challengePage = (title.includes('just a moment') || bodyText.includes('just a moment')) &&
+      (bodyText.includes('security') || bodyText.includes('verify') || bodyText.includes('cloudflare'));
     if (!root) {
       return {
         url: location.href,
+        pageReady: false,
+        challengePage,
         turnCount: 0,
+        legacyTurnCount: 0,
+        exchangeTurnCount: 0,
         contentReady: '',
         recentState: '',
         recentMode: '',
@@ -256,6 +276,8 @@ async function snapshot(cdp) {
         globalRecentUi: false,
       };
     }
+    const legacyTurns = [...document.querySelectorAll(${JSON.stringify(LEGACY_TURN_SELECTOR)})];
+    const exchangeTurns = [...document.querySelectorAll(${JSON.stringify(EXCHANGE_TURN_SELECTOR)})];
     const turns = [...document.querySelectorAll(${JSON.stringify(TURN_SELECTOR)})];
     const hidden = turns.filter(turn => turn.classList.contains('csg-hidden-old-turn')).length;
     const folded = turns.filter(turn => turn.classList.contains('csg-chat-collapsed')).length;
@@ -263,7 +285,11 @@ async function snapshot(cdp) {
     const globalRecentUi = Boolean(document.getElementById('csg-recent-accordion') || document.getElementById('csg-recent-scrollbar'));
     return {
       url: location.href,
+      pageReady: document.readyState !== 'loading' && Boolean(body),
+      challengePage,
       turnCount: turns.length,
+      legacyTurnCount: legacyTurns.length,
+      exchangeTurnCount: exchangeTurns.length,
       contentReady: root.dataset.csgContentReady || '',
       recentState: root.dataset.csgRecentState || '',
       recentMode: root.dataset.csgRecentMode || '',
@@ -296,11 +322,23 @@ async function runSmoke() {
     cdp = new CdpClient(target.webSocketDebuggerUrl);
     await cdp.send('Runtime.enable');
 
-    await waitFor(async () => {
+    const loaded = await waitFor(async () => {
       const state = await snapshot(cdp);
-      const routeReady = TEST_MODE ? state.url.includes('/share/') : state.url.startsWith('https://chatgpt.com/share/');
-      return state.turnCount >= 4 && routeReady ? state : null;
+      const routeReady = TEST_MODE ? state.url.startsWith(TARGET_URL) : state.url.startsWith('https://chatgpt.com/share/');
+      return routeReady && state.pageReady ? state : null;
     }, 20000);
+    if (loaded.challengePage) {
+      throw new Error('ChatGPT returned a bot/challenge page');
+    }
+
+    try {
+      await waitFor(async () => {
+        const state = await snapshot(cdp);
+        return state.turnCount >= 4 ? state : null;
+      }, ROOT_WAIT_TIMEOUT_MS);
+    } catch (error) {
+      throw new CompatibilityFailure('Loaded ChatGPT page no longer exposes at least four known conversation roots', error);
+    }
 
     try {
       await installChromeStub(cdp, {
@@ -346,7 +384,7 @@ async function runSmoke() {
   } finally {
     cdp?.close();
     await stopChild(launched.child);
-    fs.rmSync(launched.profile, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 });
+    cleanupProfile(launched.profile);
   }
 }
 
@@ -361,7 +399,8 @@ try {
     for (const failure of result.failures) console.error(`- ${failure}`);
     process.exitCode = 2;
   } else {
-    console.log(`PASS live-site smoke: core ready; Recent-N ready with ${result.recent.hiddenOldTurns} earlier mounted turn(s) hidden`);
+    const foldedCount = Number(result.recent.hiddenOldTurns || 0) + Number(result.recent.foldedTurns || 0);
+    console.log(`PASS live-site smoke: core ready; Recent-N ready with ${foldedCount} earlier mounted conversation root(s) folded`);
   }
   console.log(`Diagnostics: ${outputPath}`);
 } catch (error) {
