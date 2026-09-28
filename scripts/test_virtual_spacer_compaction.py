@@ -99,16 +99,22 @@ async function run(){{
   await frames(12);
   const nativeQsa=document.querySelectorAll.bind(document);let spacerReconcileQueries=0;
   document.querySelectorAll=(selector)=>{{if(selector==='[class*=\"--last-known-height\"][class*=\"--estimated-turn-height\"]')spacerReconcileQueries+=1;return nativeQsa(selector)}};
+  // A slow CI browser can still deliver one reconcile that was already queued
+  // before this probe was installed. Drain it and compare deltas so only work
+  // caused by the unrelated class churn is counted.
+  await frames(6);
+  const unrelatedBaseline=spacerReconcileQueries;
   const unrelated=document.getElementById('prev-wrap');
   for(let i=0;i<200;i++)unrelated.className=`unrelated-${{i}}`;
   await frames(4);
-  const unrelatedClassChurnIgnored=spacerReconcileQueries===0;
+  const unrelatedClassChurnIgnored=spacerReconcileQueries===unrelatedBaseline;
+  const dynamicQueryBaseline=spacerReconcileQueries;
   const dynamic=document.getElementById('dynamic-node'),dynamicBefore=rect('dynamic-next').top;
   dynamic.className='h-[var(--last-known-height,var(--estimated-turn-height,50vh))] min-h-14';
   dynamic.style.cssText='--last-known-height:110px;--estimated-turn-height:110px;height:var(--last-known-height)';
   const dynamicReady=await waitFor(()=>dynamic.classList.contains('csg-virtual-spacer-overlap'),20);
   const dyr=rect('dynamic-node'),dynr=rect('dynamic-next');
-  const sameNodeBecomesSpacer={{unrelatedClassChurnIgnored,nestedBelowBody:dynamic.parentElement!==document.body,compactedAfterClassMutation:dynamicReady,geometryKept:near(dyr.height,110),noVisibleBlank:near(dynr.top,dynamicBefore,3),marginCancels:near(parseFloat(getComputedStyle(dynamic).marginBottom),-110),boundedReconcile:spacerReconcileQueries<=2}};
+  const sameNodeBecomesSpacer={{unrelatedClassChurnIgnored,nestedBelowBody:dynamic.parentElement!==document.body,compactedAfterClassMutation:dynamicReady,geometryKept:near(dyr.height,110),noVisibleBlank:near(dynr.top,dynamicBefore,3),marginCancels:near(parseFloat(getComputedStyle(dynamic).marginBottom),-110),boundedReconcile:(spacerReconcileQueries-dynamicQueryBaseline)<=2}};
 
   // A newly inserted empty sibling must be added to the bounded attribute target
   // set before React later recycles that same node into a spacer by class change.
