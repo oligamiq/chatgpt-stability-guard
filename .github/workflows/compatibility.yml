@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   compatibility:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       regression: ${{ steps.outcomes.outputs.regression }}
@@ -128,7 +128,7 @@ jobs:
   report:
     needs: compatibility
     if: ${{ always() && !cancelled() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
