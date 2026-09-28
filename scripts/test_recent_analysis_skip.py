@@ -41,7 +41,7 @@ template = r'''<!doctype html><html><head><meta charset="utf-8"></head><body>
 <script>
 window.__turnQueries=0;
 const nativeDocumentQsa=document.querySelectorAll.bind(document);
-document.querySelectorAll=function(selector){ if(selector==='[data-testid^=\"conversation-turn-\"]') window.__turnQueries+=1; return nativeDocumentQsa(selector); };
+document.querySelectorAll=function(selector){ if(selector==='[data-testid^=\"conversation-turn-\"],[data-turn-key]') window.__turnQueries+=1; return nativeDocumentQsa(selector); };
 const old=document.getElementById('old');
 window.__oldQueries=0;
 const oldQsa=old.querySelectorAll.bind(old);

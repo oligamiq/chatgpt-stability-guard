@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.0.37 — 2026-09-28
+
+- Fixes Project/Work MCP App rows that could remain visible when root CSS gates were clobbered or stale: settled `data-mcp-app-portal-target` surfaces and their headers are now hidden directly with an owned `display: none !important` presentation while the iframe stays connected.
+- Restores any prior inline `display` value when the App must fail open again, preserving Connect/Auth/Retry and bootstrap behavior.
+- Added a saved-Project-shaped regression using the actual 38px Japanese `desktop-commander-home` structure (`アプリをタブで開く`) and verifies the portal/header become `display:none` after generation settles.
+
+## 1.0.36 — 2026-09-28
+
+- Fixes Project/Work shell updates that replace `<html class>` and silently remove Stability Guard's `csg-*` setting gates while leaving the guard runtime/status alive.
+- Adds a dedicated root-class observer that re-applies only the enabled Stability Guard classes without disturbing host classes.
+- Added a regression matching the saved Project failure: `#csg-status` survives, the host overwrites `html.className`, and Tool/App hiding must self-heal automatically.
+
+## 1.0.35 — 2026-09-28
+
+- Fixes Project/Work Tool result rows whose outer React wrapper uses `display: contents`: zero-sizing the wrapper did not hide rendered children such as `xubuntu-desktop-commander` and `View lines …` / `View file …`.
+- Settled Tool result cards now use `display: none` while remaining mounted in the DOM; live generation and Connect/Auth/Retry fail-open behavior is unchanged.
+- Added a `display: contents` regression that verifies both the provider header and result action disappear, not just the wrapper box.
+
+## 1.0.34 — 2026-09-27
+
+- Fixes current authenticated MCP App surfaces rendered through `data-mcp-app-portal-target` / `data-mcp-app-inline-surface` / `data-mcp-app-frame`; the surrounding `display: contents` wrapper could be 0x0 while its App children still rendered at full size.
+- Hides the actual MCP portal and adjacent App header only after the App is expanded/measurable and its exchange is no longer generating, while keeping Connect/Auth/bootstrap UI fail-open and the iframe mounted.
+- Added a production-shaped MCP portal regression and validated an authenticated live chat containing nine `desktop-commander-home` surfaces: all nine cards collapsed to 0x0 and disappeared in a captured live screenshot.
+
+## 1.0.33 — 2026-09-27
+
+- Fixes the remaining authenticated Project/Work Tool rows visible in real screenshots: Tool result UI may live outside `[data-turn-key]` exchange roots, so a turn-only scan could never see it.
+- Detects `View lines …` / `View file …` from visible text as well as buttons, including split-span text and flattened Tool-name/result sibling rows, while still excluding normal markdown and Connect/Auth/Retry UI.
+- On generation completion, performs one bounded `<main>` sweep so turnless Work/Tool rows are removed after settling without touching live bootstrap UI.
+- Expanded the Tool-result regression fixture to cover control, plain-text, split-text, turnless-main, flattened sibling, live-generation, auth fail-open, and markdown false-positive cases.
+
+## 1.0.32 — 2026-09-27
+
+- Hides current ChatGPT standalone Tool result cards such as `xubuntu-desktop-commander` rows followed by `View lines …` / `View file …`; these cards are rendered outside the legacy `group/tool-message` summary shell and survived 1.0.31.
+- Keeps the newest Tool result cards visible while generation is active, then removes them from layout at completion; Connect/Auth/Retry controls and lookalike text inside normal markdown fail open.
+- Added a production-shaped regression covering old/live authenticated exchanges, `View lines` and `View file` cards, generation completion, auth fail-open, and markdown false positives.
+
+## 1.0.31 — 2026-09-27
+
+- Suppresses current ChatGPT Tool/App cards rendered directly in conversation DOM, not only iframe-backed previews, including settings-style cards with multiple form controls.
+- Keeps rich Tool/App UI measurable while generation/bootstrap is active, then removes settled passive cards from layout; Connect/Auth/Retry and single actionable controls continue to fail open.
+- Added regression coverage for current DOM-style Tool settings cards, legacy Tool/App shells, authenticated generation boundaries, and action-safe behavior.
+
+## 1.0.30 — 2026-09-27
+
+- Fixed current ChatGPT rich Tool/App previews getting stuck at `Preparing preview...` by treating preparing-preview/app states as active bootstrap UI until initialization clears.
+- Restored rich-UI suppression for authenticated ChatGPT builds that use generic iframe titles instead of legacy `ui://...` titles by recognizing the same conversation preview mount/header/divider structure.
+- Added regression coverage for the full `Preparing preview...` → ready → hidden lifecycle using a generic `xubuntu-desktop-commander` iframe title while retaining the legacy `ui://` route coverage.
+
+## 1.0.28 — 2026-09-26
+
+- Restored compatibility with ChatGPT's authenticated conversation DOM by treating current `[data-turn-key]` exchange roots as first-class conversation items alongside legacy `conversation-turn-*` articles across Recent-N discovery, per-chat toggles, pre-hide/loading state, mutation compaction, and action scoping.
+- Preserved newest Tool/App/action surfaces and stale App-error handling under the authenticated DOM while compacting collapsed virtualizer cells instead of leaving large blank regions; logged-in live validation reached `recent=ready` / `per-chat` with 5 exchanges, 2 collapsed exchanges, 5 toggles, no loader, and 34px collapsed parent cells.
+- Added authenticated exchange-root regression coverage, including newest Tool/App boundary protection, and updated existing Recent-N, Auto Continue, loading, old-App-error, stress/performance, and live-smoke fixtures to exercise both DOM shapes.
+
 ## 1.0.27 — 2026-08-26
 
 - Fixed reply-time blank gaps when ChatGPT recycles an already-mounted empty node into a virtual-height spacer by class mutation; spacer discovery now follows bounded turn-local sibling lanes even if the conversation LCA widens, refreshes targets for inserted siblings, and independently learns entirely new virtualizer lanes even in summary-only mode.

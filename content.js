@@ -49,6 +49,7 @@
       toolSummaryMarkers: new Set(),
       toolSummaryStealthMarkers: new Set(),
       toolSummaryLiveMarkers: new Set(),
+      toolResultCards: new Set(),
       toolSummaryInitialSweepQueued: new WeakSet(),
       toolSummaryFallbackSweepPending: new WeakSet(),
       toolSummaryFallbackSweepCursor: new WeakMap(),
@@ -164,7 +165,9 @@
       return text.startsWith('View config ·') || text.startsWith('設定を表示 ·');
     }
 
-    const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const LEGACY_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+    const EXCHANGE_TURN_SELECTOR = '[data-turn-key]';
+    const TURN_SELECTOR = `${LEGACY_TURN_SELECTOR},${EXCHANGE_TURN_SELECTOR}`;
 
     function registerMountedTurn(turn) {
       if (!(turn instanceof Element) || !turn.matches(TURN_SELECTOR)) return false;
@@ -236,7 +239,8 @@
         attributes: true,
         attributeOldValue: true,
         attributeFilter: [
-          'data-testid', 'href', 'tabindex', 'role', 'contenteditable', 'type',
+          'data-testid', 'data-turn-key', 'data-message-id', 'data-conversation-role',
+          'data-chatgpt-search-message-ids', 'href', 'tabindex', 'role', 'contenteditable', 'type',
           'aria-modal', 'aria-label', 'aria-expanded', 'title'
         ]
       });
@@ -768,8 +772,8 @@
     }
 
     const APP_BOOTSTRAP_BUSY_SELECTOR = '[role="progressbar"],[aria-busy="true"]';
-    const APP_BOOTSTRAP_BUSY_TEXT_RE = /(?:loading|fetching|initializing|analyzing)\s+(?:app|template|image)|(?:app|template)\s+(?:loading|initializing)|アプリ[^。]{0,24}(?:読み込|ロード)|テンプレート[^。]{0,24}(?:取得|読み込)|画像[^。]{0,24}(?:解析|分析)/i;
-    const APP_BOOTSTRAP_BUSY_COMPACT_RE = /(?:loading|fetching|initializing|analyzing)(?:app|template|image)|(?:app|template)(?:loading|initializing)|アプリ.{0,24}(?:読み込|ロード)|テンプレート.{0,24}(?:取得|読み込)|画像.{0,24}(?:解析|分析)/i;
+    const APP_BOOTSTRAP_BUSY_TEXT_RE = /(?:loading|fetching|initializing|analyzing|preparing)\s+(?:app|template|image|preview)|(?:app|template|preview)\s+(?:loading|initializing|preparing)|アプリ[^。]{0,24}(?:読み込|ロード|準備)|テンプレート[^。]{0,24}(?:取得|読み込|準備)|プレビュー[^。]{0,24}(?:準備|読み込|ロード)|画像[^。]{0,24}(?:解析|分析|準備)/i;
+    const APP_BOOTSTRAP_BUSY_COMPACT_RE = /(?:loading|fetching|initializing|analyzing|preparing)(?:app|template|image|preview)|(?:app|template|preview)(?:loading|initializing|preparing)|アプリ.{0,24}(?:読み込|ロード|準備)|テンプレート.{0,24}(?:取得|読み込|準備)|プレビュー.{0,24}(?:準備|読み込|ロード)|画像.{0,24}(?:解析|分析|準備)/i;
 
     function hasBootstrapBusyText(element) {
       const walker = document.createTreeWalker(
@@ -809,21 +813,27 @@
       if (!(element instanceof Element)) return false;
       if (element.matches(APP_BOOTSTRAP_BUSY_SELECTOR) || element.querySelector(APP_BOOTSTRAP_BUSY_SELECTOR)) return true;
       if (element.closest('.markdown')) return false;
-      const uiShaped = element.matches('.no-scrollbar,.mt-2,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"]') ||
-        Boolean(element.querySelector('.no-scrollbar,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"]')) ||
-        element.nextElementSibling?.matches?.('.no-scrollbar') || element.previousElementSibling?.matches?.('.no-scrollbar');
+      const uiShaped = element.matches('.no-scrollbar,.mt-2,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-mcp-app-portal-target],[data-mcp-app-inline-surface],[data-mcp-app-frame]') ||
+        Boolean(element.querySelector('.no-scrollbar,[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-mcp-app-portal-target],[data-mcp-app-inline-surface],[data-mcp-app-frame]')) ||
+        element.nextElementSibling?.matches?.('.no-scrollbar,[data-mcp-app-portal-target]') ||
+        element.previousElementSibling?.matches?.('.no-scrollbar,[data-mcp-app-portal-target]');
       if (!uiShaped) return false;
       return hasBootstrapBusyText(element);
     }
 
     function turnId(turn) {
-      return turn instanceof Element ? (turn.getAttribute('data-testid') || '') : '';
+      if (!(turn instanceof Element)) return '';
+      const testId = turn.getAttribute('data-testid');
+      if (testId) return testId;
+      const exchangeKey = turn.getAttribute('data-turn-key');
+      return exchangeKey ? `exchange:${exchangeKey}` : '';
     }
 
     function turnMessageId(turn) {
       if (!(turn instanceof Element)) return '';
       return turn.getAttribute('data-message-id') ||
-        turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') || '';
+        turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') ||
+        turn.querySelector('[data-chatgpt-search-message-ids]')?.getAttribute('data-chatgpt-search-message-ids') || '';
     }
 
     function routeTurnIdentity(turn) {
@@ -873,6 +883,10 @@
       const protectedTurns = new Set(turns.slice(-LIVE_TOOL_GUARD_TURNS));
       for (const turn of turns) {
         const index = turnIndexFromId(turnId(turn));
+        // Authenticated exchange roots have opaque data-turn-key identities but
+        // stable mounted DOM order. The tail slice above is the safety boundary;
+        // do not fail-open every exchange merely because no numeric id exists.
+        if (turn.matches(EXCHANGE_TURN_SELECTOR) && index < 0) continue;
         if (index < 0 || latestIndex < 0 || index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1)) {
           protectedTurns.add(turn);
         }
@@ -890,6 +904,10 @@
       if (!(turn instanceof Element)) return true;
       if (!isGenerationActive()) return false;
       if (protectedTurns?.has(turn)) return true;
+      // For authenticated exchange roots the protected set is already derived
+      // from mounted DOM order, so an older exchange outside that set is safe to
+      // optimize. Legacy opaque turn ids remain fail-open below.
+      if (turn.matches(EXCHANGE_TURN_SELECTOR)) return false;
       const index = turnIndexFromId(turnId(turn));
       if (index < 0 || latestIndex < 0) return true;
       return index >= latestIndex - (LIVE_TOOL_GUARD_TURNS - 1);
@@ -1114,8 +1132,9 @@
     }
 
     function updateLatestTurnKnowledge() {
-      // Current ChatGPT turn IDs are numeric. If the site moves to opaque IDs,
-      // this feature intentionally fails open instead of guessing the latest turn.
+      // Legacy DOM exposes numeric conversation-turn-N ids. Authenticated chats
+      // now use opaque data-turn-key exchange roots; those are protected by DOM
+      // order in computeLatestBoundaryTurns() rather than a fabricated index.
       let mountedMax = -1;
       for (const turn of getTurns()) {
         mountedMax = Math.max(mountedMax, turnIndexFromId(turnId(turn)));
@@ -1149,8 +1168,10 @@
         }
         const turn = aside.closest(TURN_SELECTOR);
         const index = turnIndexFromId(turnId(turn));
-        const canProveOld = index >= 0 && state.latestTurnIndex >= 0 &&
-          turn instanceof Element && !currentLiveTurns.has(turn);
+        const exchangeOrdered = turn instanceof Element && turn.matches(EXCHANGE_TURN_SELECTOR);
+        const legacyOrdered = index >= 0 && state.latestTurnIndex >= 0;
+        const canProveOld = turn instanceof Element && !currentLiveTurns.has(turn) &&
+          (legacyOrdered || exchangeOrdered);
         aside.classList.toggle('csg-old-app-load-error', canProveOld);
       }
       state.oldAppStableTurns = routeTurnSnapshot();
@@ -1314,9 +1335,48 @@
     const APP_SURFACE_SELECTOR = [
       'iframe', 'canvas', 'video', 'audio', 'table', 'picture', 'object', 'embed',
       '[data-testid*="app"]', '[data-testid*="widget"]', '[data-testid*="artifact"]',
+      '[data-mcp-app-portal-target]', '[data-mcp-app-inline-surface]', '[data-mcp-app-frame]',
       '[role="application"]', '[role="region"]', 'aside[class*="surface-error"]'
     ].join(',');
     const APP_SURFACE_SELF_SELECTOR = APP_SURFACE_SELECTOR;
+    const TOOL_EMBED_FAIL_OPEN_RE = /(?:\b(?:connect|authori[sz]e|authenticate|sign\s*in|log\s*in|retry|add\s+(?:account|connector|plugin|source))\b|接続|認証|ログイン|連携|再試行)/i;
+    const TOOL_EMBED_FORM_SELECTOR = 'select,input:not([type="hidden"]),textarea,[role="switch"],[role="slider"],[role="checkbox"],[role="radio"],[role="combobox"]';
+    const TOOL_EMBED_HOST_SELECTOR = '[class~="group/tool-message"],[data-testid*="tool"],[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[role="application"]';
+    const TOOL_EMBED_STANDALONE_SELECTOR = '[role="region"],[role="application"],[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"]';
+
+    function richToolEmbedShell(shell) {
+      if (!(shell instanceof Element) || !isConversationTurnScoped(shell) || shell.closest('.markdown')) return false;
+      const structuralHost = shell.matches(TOOL_EMBED_HOST_SELECTOR);
+      const standaloneSurface = shell.matches(TOOL_EMBED_STANDALONE_SELECTOR) && Boolean(shell.querySelector(TOOL_EMBED_FORM_SELECTOR));
+      if (!structuralHost && !standaloneSurface) return false;
+      if (isProtectedLiveToolTurn(shell) || hasActiveAppBootstrapUi(shell)) return false;
+      if (shell.querySelector('aside[class*="surface-error"],.text-token-text-error')) return false;
+      const controls = [];
+      if (shell.matches(ACTIONABLE_UI_SELECTOR)) controls.push(shell);
+      controls.push(...shell.querySelectorAll(ACTIONABLE_UI_SELECTOR));
+      if (controls.some((control) => TOOL_EMBED_FAIL_OPEN_RE.test(boundedControlLabel(control, 181)))) return false;
+      const formControls = shell.querySelectorAll(TOOL_EMBED_FORM_SELECTOR);
+      if (formControls.length < 2 && controls.some((control) => /(?:enable\s+account|account\s+(?:access|setting)|アカウント)/i.test(boundedControlLabel(control, 181)))) return false;
+      if (shell.querySelector('.no-scrollbar,[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[role="application"]')) return true;
+      if (shell.querySelector('[role="region"]') && formControls.length >= 2) return true;
+      return false;
+    }
+
+    function refreshRichToolEmbedShell(shell) {
+      if (!(shell instanceof Element)) return;
+      const hide = Boolean(state.settings.enabled && state.settings.hideToolEmbeds && richToolEmbedShell(shell));
+      shell.classList.toggle('csg-tool-embed-ui', hide);
+    }
+
+    function refreshRichToolEmbedShells(scanRoot) {
+      if (!(scanRoot instanceof Element)) return;
+      const shells = new Set();
+      const own = scanRoot.closest?.(TOOL_EMBED_HOST_SELECTOR);
+      if (own instanceof Element) shells.add(own);
+      if (scanRoot.matches?.(TOOL_EMBED_HOST_SELECTOR) || scanRoot.matches?.(TOOL_EMBED_STANDALONE_SELECTOR)) shells.add(scanRoot);
+      scanRoot.querySelectorAll?.(`${TOOL_EMBED_HOST_SELECTOR},${TOOL_EMBED_STANDALONE_SELECTOR}`).forEach((shell) => shells.add(shell));
+      shells.forEach(refreshRichToolEmbedShell);
+    }
 
     function isToolSummaryDecoration(media, shell) {
       if (!(media instanceof Element) || !(shell instanceof Element)) return false;
@@ -1401,21 +1461,53 @@
         marker.closest('details') || marker;
     }
 
-    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"]';
-    // ChatGPT tool rich UI uses ui://<tool>/<route> titles. Do not key hiding to
-    // route names such as file-preview: config-editor and future tool routes use
-    // the same mount/header/divider structure and are also covered by
-    // hideToolEmbeds. Ordinary iframes without a ui:// title still fail open.
+    const PREVIEW_IFRAME_SELECTOR = 'iframe[title^="ui://"], .no-scrollbar iframe, [data-mcp-app-portal-target] iframe';
+    // Older ChatGPT builds exposed MCP/App routes as ui://<tool>/<route> titles.
+    // Current authenticated builds may use either a generic iframe title inside
+    // the legacy no-scrollbar mount or the newer data-mcp-app-* portal/frame DOM.
+    // Ordinary iframes still fail open unless they sit inside one of those known
+    // conversation App surfaces.
     const PREVIEW_TITLE_RE = /^ui:\/\/[^/?#]+(?:\/[^?#]*)?(?:[?#].*)?$/i;
     const PREVIEW_RETRY_RE = /(?:\bretry\b|再試行)/i;
 
+    function currentMcpAppPortalFor(iframe) {
+      if (!(iframe instanceof HTMLIFrameElement)) return null;
+      const portal = iframe.closest('[data-mcp-app-portal-target]');
+      if (!(portal instanceof Element) || !isConversationTurnScoped(portal) || portal.closest('.markdown')) return null;
+      const frame = iframe.closest('[data-mcp-app-frame]');
+      const inlineSurface = portal.querySelector('[data-mcp-app-inline-surface]');
+      if (!(frame instanceof Element) && !(inlineSurface instanceof Element)) return null;
+      return portal;
+    }
+
     function isPreviewSurfaceIframe(iframe) {
       if (!(iframe instanceof HTMLIFrameElement)) return false;
-      return PREVIEW_TITLE_RE.test(normalizeLabel(iframe.getAttribute('title')));
+      if (currentMcpAppPortalFor(iframe)) return true;
+      if (PREVIEW_TITLE_RE.test(normalizeLabel(iframe.getAttribute('title')))) return true;
+      const mount = iframe.closest('.no-scrollbar');
+      if (!(mount instanceof Element) || !isConversationTurnScoped(mount) || mount.closest('.markdown')) return false;
+      if (iframe.closest('[data-testid*="app"],[data-testid*="widget"],[data-testid*="artifact"],[class~="group/tool-message"]')) return true;
+      const header = mount.previousElementSibling;
+      const divider = mount.nextElementSibling;
+      const structuralHeader = header instanceof Element &&
+        (header.classList.contains('mt-2') || header.classList.contains('sm:mt-4'));
+      return Boolean(structuralHeader && divider instanceof Element && divider.matches('.h-px'));
     }
 
     function previewSurfaceParts(iframe) {
       if (!isPreviewSurfaceIframe(iframe)) return null;
+      const mcpPortal = currentMcpAppPortalFor(iframe);
+      if (mcpPortal) {
+        const header = mcpPortal.previousElementSibling;
+        const sameCardHeader = header instanceof Element && header.parentElement === mcpPortal.parentElement &&
+          !header.closest('.markdown') ? header : null;
+        return {
+          mount: mcpPortal,
+          header: sameCardHeader,
+          divider: null,
+          kind: 'mcp-app'
+        };
+      }
       const mount = iframe.closest('.no-scrollbar');
       if (!(mount instanceof Element) || !isConversationTurnScoped(mount) || mount.closest('.markdown')) return null;
       const header = mount.previousElementSibling;
@@ -1424,8 +1516,32 @@
       return {
         mount,
         header: header instanceof Element ? header : null,
-        divider
+        divider,
+        kind: 'legacy'
       };
+    }
+
+    function mcpAppPortalReadyForHide(parts, iframe) {
+      if (!parts || parts.kind !== 'mcp-app') return true;
+      if (!(iframe instanceof HTMLIFrameElement) || !normalizeLabel(iframe.getAttribute('src'))) return false;
+      const frame = parts.mount.querySelector('[data-mcp-app-frame]');
+      const inlineSurface = parts.mount.querySelector('[data-mcp-app-inline-surface]');
+      if (!(frame instanceof Element) || !(inlineSurface instanceof Element)) return false;
+      if (inlineSurface.getAttribute('data-mcp-app-expanded') !== 'true') return false;
+      const frameRect = frame.getBoundingClientRect();
+      const inlineRect = inlineSurface.getBoundingClientRect();
+      return frameRect.width > 0 && frameRect.height > 0 && inlineRect.width > 0 && inlineRect.height > 0;
+    }
+
+    function mcpAppPortalMustStayVisible(parts, iframe, entry) {
+      if (!parts || parts.kind !== 'mcp-app') return false;
+      const latestTurnIndex = mountedLatestTurnIndex();
+      const protectedTurns = computeLiveProtectedTurns(latestTurnIndex);
+      if (isProtectedLiveToolTurn(parts.mount, latestTurnIndex, protectedTurns)) return true;
+      if (entry?.mcpReady) return false;
+      if (!mcpAppPortalReadyForHide(parts, iframe)) return true;
+      if (entry) entry.mcpReady = true;
+      return false;
     }
 
     function previewSiblingHasAppError(scope) {
@@ -1510,6 +1626,31 @@
       else element.removeAttribute('data-csg-preview-state');
     }
 
+    const INLINE_PREVIEW_HIDE_ATTR = 'data-csg-inline-preview-hidden';
+    const INLINE_PREVIEW_DISPLAY_ATTR = 'data-csg-inline-preview-display';
+    const INLINE_PREVIEW_PRIORITY_ATTR = 'data-csg-inline-preview-display-priority';
+
+    function applyInlinePreviewHide(element) {
+      if (!(element instanceof Element) || element.hasAttribute(INLINE_PREVIEW_HIDE_ATTR)) return;
+      const previousDisplay = element.style.getPropertyValue('display');
+      const previousPriority = element.style.getPropertyPriority('display');
+      element.setAttribute(INLINE_PREVIEW_HIDE_ATTR, 'true');
+      if (previousDisplay) element.setAttribute(INLINE_PREVIEW_DISPLAY_ATTR, previousDisplay);
+      if (previousPriority) element.setAttribute(INLINE_PREVIEW_PRIORITY_ATTR, previousPriority);
+      element.style.setProperty('display', 'none', 'important');
+    }
+
+    function releaseInlinePreviewHide(element) {
+      if (!(element instanceof Element) || !element.hasAttribute(INLINE_PREVIEW_HIDE_ATTR)) return;
+      const previousDisplay = element.getAttribute(INLINE_PREVIEW_DISPLAY_ATTR) || '';
+      const previousPriority = element.getAttribute(INLINE_PREVIEW_PRIORITY_ATTR) || '';
+      if (previousDisplay) element.style.setProperty('display', previousDisplay, previousPriority);
+      else element.style.removeProperty('display');
+      element.removeAttribute(INLINE_PREVIEW_HIDE_ATTR);
+      element.removeAttribute(INLINE_PREVIEW_DISPLAY_ATTR);
+      element.removeAttribute(INLINE_PREVIEW_PRIORITY_ATTR);
+    }
+
     function isBrokenPreviewMount(element) {
       return element instanceof Element &&
         (element.classList.contains('csg-broken-preview') ||
@@ -1528,6 +1669,14 @@
       parts.header?.classList.toggle('csg-preview-live-layout', preserveLiveLayout);
       parts.mount.classList.add('csg-hidden-preview');
       parts.header?.classList.add('csg-hidden-preview-header');
+      // Current Project/Work MCP rows can survive host <html> class replacement
+      // because their iframe/header are real layout boxes. For ready MCP Apps,
+      // own the final presentation directly instead of relying only on a root
+      // CSS gate. The iframe remains connected; release restores prior display.
+      if (parts.kind === 'mcp-app' && !preserveLiveLayout) {
+        applyInlinePreviewHide(parts.mount);
+        applyInlinePreviewHide(parts.header);
+      }
       setPreviewState(parts.mount, stateName);
       setPreviewState(parts.header, stateName);
       parts.divider?.setAttribute('data-csg-preview-divider', stateName);
@@ -1550,6 +1699,7 @@
       const dividers = new Set([entry?.divider, parts?.divider].filter((node) => node instanceof Element));
       for (const mount of mounts) {
         if (preserved.has(mount)) continue;
+        releaseInlinePreviewHide(mount);
         mount.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
         setPreviewState(mount);
         mount.style.removeProperty('--csg-collapse-block');
@@ -1557,6 +1707,7 @@
       }
       for (const header of headers) {
         if (preserved.has(header)) continue;
+        releaseInlinePreviewHide(header);
         header.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         setPreviewState(header);
         header.style.removeProperty('--csg-collapse-block');
@@ -1572,6 +1723,7 @@
 
     const previewResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
       const toClear = new Set();
+      const toRelease = new Map();
       const toHide = new Map();
       for (const resizeEntry of entries) {
         const target = resizeEntry.target;
@@ -1588,6 +1740,10 @@
           toClear.add(iframe);
           continue;
         }
+        if (mcpAppPortalMustStayVisible(parts, iframe, entry)) {
+          toRelease.set(iframe, { entry, parts });
+          continue;
+        }
         toHide.set(iframe, { entry, parts });
       }
       // Batch every geometry read before any class/style write. ResizeObserver can
@@ -1598,8 +1754,13 @@
         measured.set(iframe, item.parts.mount.getBoundingClientRect().width);
       }
       for (const iframe of toClear) clearPreviewSurface(iframe);
-      for (const [iframe, { entry, parts }] of toHide) {
+      for (const [iframe, { entry, parts }] of toRelease) {
         if (toClear.has(iframe)) continue;
+        releasePreviewPresentation(entry, parts);
+        schedulePreviewProbe(iframe);
+      }
+      for (const [iframe, { entry, parts }] of toHide) {
+        if (toClear.has(iframe) || toRelease.has(iframe)) continue;
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = 0;
         hidePreviewPresentation(entry, parts, 'hidden', measured.get(iframe));
@@ -1633,8 +1794,7 @@
 
     function schedulePreviewProbe(iframe, delay = 850) {
       const entry = state.previewSurfaces.get(iframe);
-      if (!entry) return;
-      clearTimeout(entry.timer);
+      if (!entry || entry.timer) return;
       entry.timer = setTimeout(() => {
         entry.timer = 0;
         probePreviewSurface(iframe);
@@ -1665,6 +1825,8 @@
           previewResizeObserver?.unobserve(entry.mount);
           if (state.previewMounts.get(entry.mount) === iframe) state.previewMounts.delete(entry.mount);
         }
+        releaseInlinePreviewHide(entry.mount);
+        releaseInlinePreviewHide(entry.header);
         entry.mount?.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
         entry.header?.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         entry.divider?.removeAttribute('data-csg-preview-divider');
@@ -1675,6 +1837,7 @@
         entry.mount = parts.mount;
         entry.header = parts.header;
         entry.divider = parts.divider;
+        entry.mcpReady = false;
         state.previewMounts.set(parts.mount, iframe);
         previewResizeObserver?.observe(parts.mount);
         parts.mount.classList.add('csg-preview-settling');
@@ -1684,6 +1847,15 @@
       }
       if (previewHasFailOpenUi(parts)) {
         clearPreviewSurface(iframe);
+        return;
+      }
+      if (mcpAppPortalMustStayVisible(parts, iframe, entry)) {
+        // Current data-mcp-app-* portals need a real measured box while the App
+        // is bootstrapping. Do not repeat the old Preparing-preview regression by
+        // collapsing the portal before generation has settled and ChatGPT has
+        // published a non-zero expanded inline surface/frame.
+        releasePreviewPresentation(entry, parts);
+        schedulePreviewProbe(iframe);
         return;
       }
       entry.probes += 1;
@@ -1700,7 +1872,7 @@
       if (!parts) return;
       let entry = state.previewSurfaces.get(iframe);
       if (!entry) {
-        entry = { mount: parts.mount, header: parts.header, divider: parts.divider, timer: 0, stableTiny: 0, probes: 0, brokenChecks: 0 };
+        entry = { mount: parts.mount, header: parts.header, divider: parts.divider, timer: 0, stableTiny: 0, probes: 0, brokenChecks: 0, mcpReady: false };
         state.previewSurfaces.set(iframe, entry);
         state.previewMounts.set(parts.mount, iframe);
         previewResizeObserver?.observe(iframe);
@@ -1713,6 +1885,7 @@
       if (!state.settings.enabled || !state.settings.hideToolEmbeds) return;
       const rootElement = scanRoot instanceof Element ? scanRoot : scanRoot?.parentElement;
       if (!(rootElement instanceof Element) || isRecentAnalysisSuppressed(rootElement)) return;
+      refreshRichToolEmbedShells(rootElement);
       if (rootElement.matches(PREVIEW_IFRAME_SELECTOR)) trackPreviewIframe(rootElement);
       rootElement.querySelectorAll?.(PREVIEW_IFRAME_SELECTOR).forEach(trackPreviewIframe);
       const mount = rootElement.closest?.('.no-scrollbar');
@@ -1733,9 +1906,208 @@
 
     function clearAllPreviewSurfaces() {
       for (const iframe of [...state.previewSurfaces.keys()]) clearPreviewSurface(iframe);
+      document.querySelectorAll?.('.csg-tool-embed-ui').forEach((shell) => shell.classList.remove('csg-tool-embed-ui'));
     }
 
     const TOOL_CHROME_CANDIDATES = 'button,[role="button"],summary,[aria-expanded]';
+    const TOOL_RESULT_CARD_CONTROL_SELECTOR = 'button,[role="button"],[aria-expanded],a[href]';
+    const TOOL_RESULT_CARD_ACTION_RE = /^(?:View\s+(?:lines?\s+\d+(?:\s*[-–—]\s*\d+)?|file)\s*(?:[·•]\s*.+)?|(?:行|ファイル)[^。\n]{0,120}(?:表示|開く|見る))$/i;
+    const TOOL_RESULT_CARD_TEXT_HINT_RE = /(?:\bView\s+(?:lines?|file)\b|(?:行|ファイル)[^。\n]{0,80}(?:表示|開く|見る))/i;
+
+    function toolResultActionLabel(control) {
+      if (!(control instanceof Element) || control.closest('.markdown')) return '';
+      const labels = [
+        boundedElementText(control, 281, 32),
+        boundedControlLabel(control, 281)
+      ];
+      return labels.find((label) => label && label.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(label)) || '';
+    }
+
+    function toolResultHintCount(value) {
+      const text = normalizeLabel(value);
+      const english = text.match(/\bView\s+(?:lines?|file)\b/gi)?.length || 0;
+      const japanese = text.match(/(?:行|ファイル)[^。\n]{0,80}(?:表示|開く|見る)/g)?.length || 0;
+      return english + japanese;
+    }
+
+    function isToolResultProviderLabel(value) {
+      const text = normalizeLabel(value).replace(/[↗↘↙↖⌄›»]/g, '').trim();
+      if (!text || text.length > 160 || /[.!?。！？]/.test(text)) return false;
+      if (/^(?:view|open|show|hide|expand|collapse)\b/i.test(text)) return false;
+      return /^[a-z0-9][a-z0-9_.:]*[-_.:][a-z0-9_.:-]+$/i.test(text) ||
+        /(?:desktop-commander|\bmcp\b|composio|connector|plugin|tool)/i.test(text);
+    }
+
+    function hasToolResultFailOpenAction(shell, resultControl) {
+      if (!(shell instanceof Element)) return true;
+      const controls = [];
+      if (shell.matches(ACTIONABLE_UI_SELECTOR)) controls.push(shell);
+      controls.push(...shell.querySelectorAll(ACTIONABLE_UI_SELECTOR));
+      return controls.some((control) => {
+        if (control === resultControl || resultControl?.contains(control) || control.contains(resultControl)) return false;
+        const label = boundedControlLabel(control, 181);
+        return Boolean(label && ACTION_LINK_LABEL_RE.test(label));
+      });
+    }
+
+    function toolResultTextAnchorsFor(scope, maxHits = 128) {
+      if (!(scope instanceof Element) || scope.closest('.markdown')) return [];
+      const anchors = new Set();
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!(parent instanceof Element) || parent.closest('.markdown,script,style,textarea,[contenteditable="true"]')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          const text = normalizeLabel(node.nodeValue || '');
+          return text && TOOL_RESULT_CARD_TEXT_HINT_RE.test(text)
+            ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+        }
+      });
+      let node = walker.nextNode();
+      while (node && anchors.size < maxHits) {
+        let element = node.parentElement;
+        for (let depth = 0; element instanceof Element && depth < 4; depth += 1) {
+          if (element.closest('.markdown')) break;
+          const label = boundedElementText(element, 281, 32);
+          if (label && label.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(label)) {
+            anchors.add(element);
+            break;
+          }
+          if (!label || label.length > 280) break;
+          element = element.parentElement;
+        }
+        node = walker.nextNode();
+      }
+      return [...anchors];
+    }
+
+    function toolResultCardPresentationFor(anchor, latestTurnIndex = mountedLatestTurnIndex(), protectedTurns = computeLiveProtectedTurns(latestTurnIndex)) {
+      if (!(anchor instanceof Element) || anchor.closest('.markdown')) return [];
+      const actionLabel = toolResultActionLabel(anchor);
+      if (!actionLabel) return [];
+      const turn = anchor.closest(TURN_SELECTOR);
+      if (turn instanceof Element) {
+        if (isProtectedLiveToolTurn(anchor, latestTurnIndex, protectedTurns)) return [];
+      } else if (isGenerationActive()) {
+        // A turnless Work/tool surface has no stable exchange identity. Preserve it
+        // while generation is active and classify it only after the reply settles.
+        return [];
+      }
+
+      const boundary = turn || anchor.closest('[data-chatgpt-search-message-ids],[data-message-author-role="assistant"],main,[role="main"]');
+      let branch = anchor;
+      let best = null;
+      for (let depth = 0; depth < 8; depth += 1) {
+        const parent = branch.parentElement;
+        if (!(parent instanceof Element) || parent === boundary || parent.closest('.markdown')) break;
+        if (parent.matches('[data-chatgpt-search-message-ids],[data-message-author-role="assistant"]')) break;
+        const parentText = boundedElementText(parent, 901, 64);
+        if (!parentText || parentText.length > 900 || toolResultHintCount(parentText) > 1) break;
+
+        let headerLikeSibling = false;
+        for (const child of parent.children) {
+          if (child === branch || child.contains(anchor)) continue;
+          if (child.matches('.markdown,.sr-only') || child.querySelector?.('.markdown')) continue;
+          const label = boundedElementText(child, 181, 24);
+          if (!label || label.length > 180 || TOOL_RESULT_CARD_ACTION_RE.test(label)) continue;
+          if (isToolResultProviderLabel(label)) {
+            headerLikeSibling = true;
+            break;
+          }
+        }
+        const hintAt = parentText.search(TOOL_RESULT_CARD_TEXT_HINT_RE);
+        const prefix = hintAt > 0 ? parentText.slice(0, hintAt) : '';
+        const providerPrefix = hintAt > 0 && isToolResultProviderLabel(prefix);
+        if ((headerLikeSibling || providerPrefix) && !hasToolResultFailOpenAction(parent, anchor)) best = parent;
+        branch = parent;
+      }
+      if (best) return [best];
+
+      // Some current Work/tool cards are flattened: the provider header and the
+      // “View lines/file” row are siblings without a dedicated outer card. Hide
+      // the pair rather than growing to a container that also owns other calls.
+      let row = anchor;
+      for (let depth = 0; depth < 6; depth += 1) {
+        const rowText = boundedElementText(row, 281, 32);
+        if (rowText && rowText.length <= 280 && TOOL_RESULT_CARD_ACTION_RE.test(rowText)) {
+          const previous = row.previousElementSibling;
+          const previousText = previous instanceof Element ? boundedElementText(previous, 181, 24) : '';
+          if (previous instanceof Element && !previous.closest('.markdown') &&
+              isToolResultProviderLabel(previousText) &&
+              !hasToolResultFailOpenAction(row.parentElement, anchor)) {
+            return [previous, row];
+          }
+        }
+        const parent = row.parentElement;
+        if (!(parent instanceof Element) || parent === boundary || parent.closest('.markdown')) break;
+        row = parent;
+      }
+      return [];
+    }
+
+    function markToolResultCard(card) {
+      if (!(card instanceof Element)) return;
+      card.classList.add('csg-tool-result-card');
+      state.toolResultCards.add(card);
+    }
+
+    function unmarkToolResultCard(card) {
+      if (!(card instanceof Element)) return;
+      card.classList.remove('csg-tool-result-card');
+      state.toolResultCards.delete(card);
+    }
+
+    function toolResultScanScopes(scanRoot) {
+      const scopes = new Set();
+      if (!(scanRoot instanceof Element)) return [];
+      const containingTurn = scanRoot.matches(TURN_SELECTOR) ? scanRoot : scanRoot.closest(TURN_SELECTOR);
+      if (containingTurn) scopes.add(containingTurn);
+      scanRoot.querySelectorAll?.(TURN_SELECTOR).forEach((turn) => scopes.add(turn));
+      const main = scanRoot.matches('main,[role="main"]')
+        ? scanRoot : (scanRoot.closest('main,[role="main"]') || scanRoot.querySelector?.('main,[role="main"]'));
+      const broadRoot = scanRoot === document.body || scanRoot === document.documentElement || scanRoot.matches('main,[role="main"]');
+      // Work/tool execution rows may be rendered as siblings of exchange roots
+      // inside <main>. A turn-only sweep therefore misses exactly the rows seen
+      // in the authenticated Project UI. Include main on broad completion/initial
+      // sweeps while keeping ordinary nested mutation scans local to one turn.
+      if (main instanceof Element && (broadRoot || !scopes.size)) scopes.add(main);
+      if (!scopes.size) scopes.add(scanRoot);
+      return [...scopes];
+    }
+
+    function scanToolResultCards(scanRoot, latestTurnIndex = mountedLatestTurnIndex()) {
+      if (!(scanRoot instanceof Element) || !state.settings.enabled || !state.settings.hideToolSummary) return;
+      const protectedTurns = computeLiveProtectedTurns(latestTurnIndex);
+      for (const scope of toolResultScanScopes(scanRoot)) {
+        if (!(scope instanceof Element) || isRecentAnalysisSuppressed(scope)) continue;
+        if (scope.matches(TURN_SELECTOR) && isProtectedLiveToolTurn(scope, latestTurnIndex, protectedTurns)) continue;
+        if (!scope.matches(TURN_SELECTOR) && isGenerationActive()) continue;
+
+        const anchors = new Set();
+        const controls = [];
+        if (scope.matches(TOOL_RESULT_CARD_CONTROL_SELECTOR)) controls.push(scope);
+        controls.push(...scope.querySelectorAll(TOOL_RESULT_CARD_CONTROL_SELECTOR));
+        for (const control of controls) if (toolResultActionLabel(control)) anchors.add(control);
+        toolResultTextAnchorsFor(scope).forEach((anchor) => anchors.add(anchor));
+
+        const found = new Set();
+        for (const anchor of anchors) {
+          for (const card of toolResultCardPresentationFor(anchor, latestTurnIndex, protectedTurns)) {
+            found.add(card);
+            markToolResultCard(card);
+          }
+        }
+        for (const card of [...state.toolResultCards]) {
+          if (!card.isConnected) {
+            state.toolResultCards.delete(card);
+            continue;
+          }
+          if (!scope.contains(card) || found.has(card)) continue;
+          unmarkToolResultCard(card);
+        }
+      }
+    }
 
     function boundedToolSummaryLabel(element, maxChars = 181) {
       if (!(element instanceof Element)) return '';
@@ -2360,6 +2732,9 @@
         : [];
       const turnStructureChanged = uniqueCandidates.some((el) => el.matches(TURN_SELECTOR));
       const scanHasTurn = isConversationTurnScoped(scanRoot) || Boolean(scanRoot.querySelector(TURN_SELECTOR));
+      if (state.settings.enabled && state.settings.hideToolSummary) {
+        scanToolResultCards(scanRoot, latestTurnIndex);
+      }
       // Mounted App/tool surfaces remain rendered to avoid lifecycle/template
       // failures. Only confirmed broken preview surfaces are visually suppressed.
       const toolCandidates = [];
@@ -2434,7 +2809,7 @@
       const compact = new Set();
       for (const node of state.pendingRoots) {
         if (!(node instanceof Element) || !node.isConnected || isRecentAnalysisSuppressed(node)) continue;
-        const turn = node.closest('[data-testid^="conversation-turn-"]');
+        const turn = node.closest(TURN_SELECTOR);
         const parent = node.parentElement;
         const anchor = turn || (parent && parent !== document.body ? parent : node);
         compact.add(anchor);
@@ -2442,7 +2817,7 @@
       if (compact.size > 160) {
         const mountedTurns = [...getTurns()];
         const extras = [...compact]
-          .filter((node) => !node.matches?.('[data-testid^="conversation-turn-"]'));
+          .filter((node) => !node.matches?.(TURN_SELECTOR));
         const errorExtras = extras.filter((node) =>
           node.matches?.('aside[class*="surface-error"], .csg-old-app-load-error') ||
           Boolean(node.querySelector?.('aside[class*="surface-error"], .csg-old-app-load-error'))
@@ -2562,6 +2937,13 @@
       const roleNode = turn.querySelector('[data-message-author-role]');
       const nested = roleNode?.getAttribute('data-message-author-role');
       if (nested) return nested.toLowerCase();
+      if (turn.matches(EXCHANGE_TURN_SELECTOR)) {
+        if (turn.querySelector('[data-conversation-role="assistant"]')) return 'assistant';
+        const headings = [...turn.querySelectorAll('h4')]
+          .map((heading) => normalizeLabel(heading.textContent || ''));
+        if (headings.includes('ChatGPT said:')) return 'assistant';
+        if (headings.includes('You said:')) return 'user';
+      }
       if (turn.classList.contains('user-turn') || turn.querySelector('.user-turn')) return 'user';
       if (turn.classList.contains('agent-turn') || turn.querySelector('.agent-turn')) return 'assistant';
       return '';
@@ -2775,21 +3157,38 @@
       }, 500);
     }
 
+    const ROOT_SETTING_CLASS_MAP = [
+      ['csg-hide-thinking', 'hideThinking'],
+      ['csg-hide-tools', 'hideTools'],
+      ['csg-hide-tool-summary', 'hideToolSummary'],
+      ['csg-hide-tool-embeds', 'hideToolEmbeds'],
+      ['csg-hide-old-app-errors', 'hideOldAppLoadErrors'],
+      ['csg-dim-traces', 'dimTraces'],
+      ['csg-compact-traces', 'compactTraces'],
+      ['csg-reduce-motion', 'reduceMotion'],
+      ['csg-lazy-heavy', 'lazyHeavyBlocks'],
+      ['csg-freeze-old', 'freezeOldTurns']
+    ];
+
     function toggleClass(name, on) {
       root.classList.toggle(name, Boolean(state.settings.enabled && on));
     }
 
+    function syncRootSettingClasses() {
+      for (const [name, key] of ROOT_SETTING_CLASS_MAP) {
+        toggleClass(name, state.settings[key]);
+      }
+    }
+
+    const rootClassObserver = new MutationObserver(() => {
+      // Project/Work can replace the <html> className wholesale during shell
+      // updates. Re-assert only Stability Guard's setting classes; host classes
+      // remain untouched and no work is done once everything already matches.
+      syncRootSettingClasses();
+    });
+
     function applySettings() {
-      toggleClass('csg-hide-thinking', state.settings.hideThinking);
-      toggleClass('csg-hide-tools', state.settings.hideTools);
-      toggleClass('csg-hide-tool-summary', state.settings.hideToolSummary);
-      toggleClass('csg-hide-tool-embeds', state.settings.hideToolEmbeds);
-      toggleClass('csg-hide-old-app-errors', state.settings.hideOldAppLoadErrors);
-      toggleClass('csg-dim-traces', state.settings.dimTraces);
-      toggleClass('csg-compact-traces', state.settings.compactTraces);
-      toggleClass('csg-reduce-motion', state.settings.reduceMotion);
-      toggleClass('csg-lazy-heavy', state.settings.lazyHeavyBlocks);
-      toggleClass('csg-freeze-old', state.settings.freezeOldTurns);
+      syncRootSettingClasses();
       bindVirtualSpacerObserver();
       if (!state.settings.enabled || !state.settings.hideToolSummary) {
         clearTimeout(state.toolCleanupTimer);
@@ -2808,6 +3207,8 @@
         state.toolSummaryMarkers.clear();
         state.toolSummaryStealthMarkers.clear();
         state.toolSummaryLiveMarkers.clear();
+        for (const card of [...state.toolResultCards]) unmarkToolResultCard(card);
+        state.toolResultCards.clear();
         for (const root of state.toolSummaryPendingRoots) state.pendingRoots.delete(root);
         state.toolSummaryPendingRoots.clear();
         // A later re-enable on the same React DOM must be allowed to perform a
@@ -2848,6 +3249,11 @@
         else scanPreviewSurfaces(document.body);
       }
       if (state.settings.hideToolSummary) {
+        // Current ChatGPT also renders completed tool-result cards (for example
+        // “View lines …” / “View file …”) outside the legacy group/tool-message
+        // summary shell. Classify those explicitly so they do not survive as
+        // large black cards when summary chrome is hidden.
+        scanToolResultCards(document.body);
         // Recent-N owns the visual fate of old turns, so avoid spending Tool/App
         // analysis work inside turns that are already provisionally/finally folded.
         analysisTurns.forEach((turn) => scheduleHistoricalToolSummaryShellSweep(turn));
@@ -2899,7 +3305,8 @@
             ...state.textToolShells,
             ...[...state.toolSummaryMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
             ...[...state.toolSummaryStealthMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
-            ...[...state.toolSummaryLiveMarkers].filter((marker) => !marker.closest('.csg-tool-ui'))
+            ...[...state.toolSummaryLiveMarkers].filter((marker) => !marker.closest('.csg-tool-ui')),
+            ...state.toolResultCards
           ].filter((el) => el.isConnected && outsideHiddenTrace(el)).length : 0;
       const hiddenToolEmbeds = enabled && state.settings.hideToolEmbeds
         ? [...state.previewSurfaces.values()].filter((entry) =>
@@ -3024,8 +3431,10 @@
         );
       }
       if (mutation.type !== 'attributes') return false;
-      const oldId = String(mutation.oldValue || '');
-      return mutation.target.matches?.(TURN_SELECTOR) || oldId.startsWith('conversation-turn-');
+      const oldValue = String(mutation.oldValue || '');
+      const wasLegacyTurn = mutation.attributeName === 'data-testid' && oldValue.startsWith('conversation-turn-');
+      const wasExchangeTurn = mutation.attributeName === 'data-turn-key' && Boolean(oldValue);
+      return mutation.target.matches?.(TURN_SELECTOR) || wasLegacyTurn || wasExchangeTurn;
     }
 
     function bindSummaryBoundaryObserver() {
@@ -3056,7 +3465,7 @@
         if (root.matches(TURN_SELECTOR)) {
           state.summaryBoundaryObserver.observe(root, {
             attributes: true,
-            attributeFilter: ['data-testid'],
+            attributeFilter: ['data-testid', 'data-turn-key'],
             attributeOldValue: true
           });
         } else {
@@ -3094,7 +3503,8 @@
           state.summaryGenerationActive = nextActive;
           if (changed) {
             if (state.settings.hideToolSummary && !needsGeneralMutationScan()) refreshSummaryLiveObservation();
-            if (needsGeneralMutationScan()) scheduleScan();
+            if (state.settings.hideToolSummary && !nextActive) scheduleScan(document.body);
+            else if (needsGeneralMutationScan()) scheduleScan();
             if (state.settings.autoContinueIncomplete) scheduleAutoContinueCheck();
           }
           if (!state.summaryGenerationRoot?.isConnected) bindSummaryGenerationObserver();
@@ -3146,7 +3556,7 @@
       let removed = false;
       let conversationTurnChanged = false;
       let generationStateChanged = false;
-      const classifiedSelector = '.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live';
+      const classifiedSelector = '.csg-thinking, .csg-tool, .csg-tool-ui, .csg-tool-summary, .csg-tool-summary-stealth, .csg-tool-summary-live, .csg-tool-result-card';
 
       // Summary mutations are fed into a bounded idle queue. Never process
       // every added React node synchronously in one observer callback.
@@ -3180,8 +3590,11 @@
             generationStateChanged = true;
           }
           scheduleSummaryMutationRoot(target);
-          if (mutation.attributeName === 'data-testid' &&
-              (target.matches(TURN_SELECTOR) || String(mutation.oldValue || '').startsWith('conversation-turn-'))) {
+          const wasLegacyTurn = mutation.attributeName === 'data-testid' &&
+            String(mutation.oldValue || '').startsWith('conversation-turn-');
+          const wasExchangeTurn = mutation.attributeName === 'data-turn-key' && Boolean(mutation.oldValue);
+          if ((mutation.attributeName === 'data-testid' || mutation.attributeName === 'data-turn-key') &&
+              (target.matches(TURN_SELECTOR) || wasLegacyTurn || wasExchangeTurn)) {
             if (target.matches(TURN_SELECTOR)) registerMountedTurn(target);
             else unregisterMountedTurn(target);
             conversationTurnChanged = true;
@@ -3296,6 +3709,7 @@
 
     chrome.storage.local.get({ settings: DEFAULTS }, ({ settings }) => {
       state.settings = normalizeSettings(settings);
+      rootClassObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
       seedMountedTurns();
       if (state.settings.enabled && state.settings.hideOldAppLoadErrors) {
         // Seed route identity synchronously at document_idle. Without this,

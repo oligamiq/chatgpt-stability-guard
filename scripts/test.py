@@ -20,6 +20,7 @@ def main():
     for script in ('content.js', 'recent-window.js', 'popup.js', 'prehide.js', 'privacy.js'):
         run(node, '--check', script)
     run(node, '--check', 'scripts/live_site_smoke.mjs')
+    run(node, '--check', 'scripts/authenticated_site_canary.mjs')
     run(sys.executable, 'scripts/test_old_app_errors.py')
     run(sys.executable, 'scripts/test_recent_window.py')
     run(sys.executable, 'scripts/test_recent_window_exhaustive.py')
@@ -30,6 +31,9 @@ def main():
     run(sys.executable, 'scripts/test_loading_indicator.py')
     run(sys.executable, 'scripts/test_recent_analysis_skip.py')
     run(sys.executable, 'scripts/test_auto_continue.py')
+    run(sys.executable, 'scripts/test_authenticated_tool_boundary.py')
+    run(sys.executable, 'scripts/test_tool_result_cards.py')
+    run(sys.executable, 'scripts/test_current_mcp_app_portal.py')
     run(sys.executable, 'scripts/test_ui_isolation.py')
     run(sys.executable, 'scripts/test_generation_completion.py')
     run(sys.executable, 'scripts/test_summary_generation_completion.py')
@@ -38,6 +42,7 @@ def main():
     run(sys.executable, 'scripts/test_package.py')
     run(sys.executable, 'scripts/test_live_site_contract.py')
     run(sys.executable, 'scripts/test_live_site_smoke.py')
+    run(sys.executable, 'scripts/test_authenticated_site_canary.py')
     print('ALL TESTS OK')
 
 

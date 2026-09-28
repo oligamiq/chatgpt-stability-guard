@@ -1,7 +1,9 @@
 (() => {
   'use strict';
 
-  const TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+  const LEGACY_TURN_SELECTOR = '[data-testid^="conversation-turn-"]';
+  const EXCHANGE_TURN_SELECTOR = '[data-turn-key]';
+  const TURN_SELECTOR = `${LEGACY_TURN_SELECTOR},${EXCHANGE_TURN_SELECTOR}`;
   const ROOT = document.documentElement;
   const DEFAULTS = { enabled: true, showRecentOnly: false, recentExchanges: 3 };
   const LOADING_WATCHDOG_MS = 60000;
@@ -103,6 +105,28 @@
     return /^\/(?:g\/[^/]+\/)?c\//.test(location.pathname) || isShareRoute();
   }
 
+  function isExchangeTurn(turn) {
+    return turn instanceof Element && turn.matches(EXCHANGE_TURN_SELECTOR) && !turn.matches(LEGACY_TURN_SELECTOR);
+  }
+
+  function isExchangeKey(key) {
+    return String(key || '').startsWith('x:');
+  }
+
+  function exchangeTurnAtPhysicalStart(turn) {
+    if (!isExchangeTurn(turn)) return false;
+    const cell = turn.parentElement;
+    const container = cell?.parentElement;
+    if (!(cell instanceof Element) || !(container instanceof Element)) return false;
+    const firstTurnCell = [...container.children].find((child) =>
+      child instanceof Element &&
+      (child.matches(EXCHANGE_TURN_SELECTOR) || child.querySelector(`:scope > ${EXCHANGE_TURN_SELECTOR}`))
+    );
+    if (firstTurnCell !== cell) return false;
+    const marginTop = Number.parseFloat(getComputedStyle(cell).marginTop || '0');
+    return Number.isFinite(marginTop) && Math.abs(marginTop) <= 1;
+  }
+
   function isJapaneseUi() {
     const preference = String(state.uiLanguage || 'auto').toLowerCase();
     return preference === 'ja' || (preference === 'auto' && String(navigator.language || '').toLowerCase().startsWith('ja'));
@@ -139,6 +163,8 @@
   }
 
   function historyStartKnown() {
+    const firstExchange = getTurns().find((turn) => isExchangeTurn(turn));
+    if (firstExchange && exchangeTurnAtPhysicalStart(firstExchange)) return true;
     for (const key of state.sequence) {
       if (state.numeric.get(key) === 0 && state.roles.has(key)) return true;
     }
@@ -154,7 +180,7 @@
       const confirmed = recent.filter((entry, index) => entry.confirmed || (startKnown && index === 0 && starts.length <= target)).length;
       return { confirmed: Math.min(target, confirmed), target, startKnown };
     }
-    const starts = userKeys();
+    const starts = privateExchangeStartKeys();
     const target = startKnown && starts.length < state.n ? Math.max(1, starts.length) : state.n;
     return { confirmed: Math.min(target, starts.length), target, startKnown };
   }
@@ -337,7 +363,10 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-message-id', 'data-turn-id'],
+      attributeFilter: [
+        'data-testid', 'data-turn-key', 'data-turn', 'data-message-author-role',
+        'data-conversation-role', 'data-message-id', 'data-chatgpt-search-message-ids', 'data-turn-id'
+      ],
       attributeOldValue: true
     });
   }
@@ -352,7 +381,14 @@
     const nested = roleNode?.getAttribute('data-message-author-role');
     if (nested === 'user' || nested === 'assistant') return nested;
     const nestedTurn = turn.querySelector('[data-turn="user"],[data-turn="assistant"]')?.getAttribute('data-turn');
-    return nestedTurn === 'user' || nestedTurn === 'assistant' ? nestedTurn : '';
+    if (nestedTurn === 'user' || nestedTurn === 'assistant') return nestedTurn;
+    if (isExchangeTurn(turn)) {
+      if (turn.querySelector('[data-conversation-role="assistant"]')) return 'assistant';
+      const headings = [...turn.querySelectorAll('h4')].map((heading) => String(heading.textContent || '').trim());
+      if (headings.includes('ChatGPT said:')) return 'assistant';
+      if (headings.includes('You said:')) return 'user';
+    }
+    return '';
   }
 
   function assistantTurnHasRenderableContent(turn) {
@@ -409,6 +445,8 @@
 
   function turnKey(turn) {
     if (!(turn instanceof Element)) return '';
+    const exchangeKey = turn.getAttribute('data-turn-key');
+    if (exchangeKey) return `x:${exchangeKey}`;
     const testId = turn.getAttribute('data-testid');
     if (testId) return `t:${testId}`;
     const ownMessageId = turn.getAttribute('data-message-id');
@@ -422,7 +460,9 @@
     if (!(turn instanceof Element)) return '';
     const own = turn.getAttribute('data-message-id');
     if (own) return own;
-    return turn.querySelector('[data-message-id]')?.getAttribute('data-message-id') || '';
+    const nested = turn.querySelector('[data-message-id]')?.getAttribute('data-message-id');
+    if (nested) return nested;
+    return turn.querySelector('[data-chatgpt-search-message-ids]')?.getAttribute('data-chatgpt-search-message-ids') || '';
   }
 
   function numericTurnIndex(turn) {
@@ -826,6 +866,10 @@
     return state.sequence.filter((key) => state.roles.get(key) === 'user');
   }
 
+  function privateExchangeStartKeys() {
+    return state.sequence.filter((key) => isExchangeKey(key) || state.roles.get(key) === 'user');
+  }
+
   function trustedTailKeys() {
     if (!state.sequence.length) return [];
     if (!isShareRoute()) return [...state.sequence];
@@ -876,7 +920,7 @@
   }
 
   function exchangeStartKeys() {
-    if (!isShareRoute()) return userKeys();
+    if (!isShareRoute()) return privateExchangeStartKeys();
     return shareExchangeStarts().map((entry) => entry.key);
   }
 
@@ -894,7 +938,7 @@
       if (!historyStartKnown() && !boundary?.confirmed) return '';
       return boundary?.key || '';
     }
-    const starts = userKeys();
+    const starts = privateExchangeStartKeys();
     state.hiddenExchangeCount = Math.max(0, starts.length - state.n);
     if (!starts.length) return '';
     if (starts.length < state.n) return historyStartKnown() ? starts[0] : '';
@@ -1021,7 +1065,7 @@
     const items = currentWindow();
     const starts = [];
     items.forEach((item, index) => {
-      if (item.role === 'user') starts.push(index);
+      if (isExchangeTurn(item.turn) || item.role === 'user') starts.push(index);
     });
     const boundaryIndex = starts.length > state.n ? starts[starts.length - state.n] : -1;
     items.forEach((item, index) => {
@@ -1453,6 +1497,20 @@
     const turn = findMountedByKey(key);
     if (!(turn instanceof Element)) return false;
     const actualRole = turnRole(turn);
+    if (!isShareRoute() && isExchangeKey(key)) {
+      const exchangeKey = turn.getAttribute('data-turn-key') || '';
+      if (!isExchangeTurn(turn) || `x:${exchangeKey}` !== key) return false;
+      const hasConversationEvidence = Boolean(
+        turn.querySelector('[data-content-search-turn-key],[data-conversation-role="assistant"],h4.sr-only,.markdown')
+      );
+      if (!hasConversationEvidence) return false;
+      if (actualRole === 'user' || actualRole === 'assistant') {
+        state.roles.set(key, actualRole);
+        state.roleLocks.set(key, actualRole);
+      }
+      state.roleValidation.delete(key);
+      return true;
+    }
     if (!isShareRoute()) {
       const stableUser = actualRole === 'user' && isStableUserKey(key);
       if (stableUser) {
@@ -1598,7 +1656,7 @@
 
   function mutationContainsRoleEvidence(mutation) {
     if (mutation.target instanceof Element && mutation.target.closest('.markdown')) return false;
-    const selector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"]';
+    const selector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"],[data-conversation-role]';
     for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
       if (!(node instanceof Element)) continue;
       if (node.matches(selector) || (node.firstElementChild && node.querySelector?.(selector))) return true;
@@ -1613,11 +1671,12 @@
       for (const mutation of mutations) {
         if (mutation.type === 'attributes') {
           const target = mutation.target instanceof Element ? mutation.target : null;
-          const wasTurnTestId = mutation.attributeName === 'data-testid' &&
+          const wasLegacyTurn = mutation.attributeName === 'data-testid' &&
             String(mutation.oldValue || '').startsWith('conversation-turn-');
-          if (wasTurnTestId || target?.matches(TURN_SELECTOR) || target?.closest(TURN_SELECTOR)) {
+          const wasExchangeTurn = mutation.attributeName === 'data-turn-key' && Boolean(mutation.oldValue);
+          if (wasLegacyTurn || wasExchangeTurn || target?.matches(TURN_SELECTOR) || target?.closest(TURN_SELECTOR)) {
             structureChanged = true;
-            if (wasTurnTestId && target && !target.matches(TURN_SELECTOR)) {
+            if ((wasLegacyTurn || wasExchangeTurn) && target && !target.matches(TURN_SELECTOR)) {
               unregisterMountedTurn(target);
               target.classList.remove('csg-hidden-old-turn', 'csg-chat-collapsed');
               target.querySelector(':scope > .csg-chat-toggle')?.remove();

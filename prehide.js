@@ -94,8 +94,8 @@
       let orderDirty = false;
       let scheduled = false;
 
-      const turnSelector = '[data-testid^="conversation-turn-"]';
-      const roleSelector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"]';
+      const turnSelector = '[data-testid^="conversation-turn-"],[data-turn-key]';
+      const roleSelector = '[data-message-author-role],[data-turn="user"],[data-turn="assistant"],[data-conversation-role]';
       const track = (turn) => {
         if (!(turn instanceof Element) || !turn.matches(turnSelector)) return false;
         const added = !tracked.has(turn);
@@ -132,7 +132,7 @@
         (node.matches(roleSelector) || (node.firstElementChild && node.querySelector(roleSelector)));
       const turnsInOrder = () => {
         if (!orderDirty) return ordered;
-        ordered = [...tracked].filter((turn) => turn.isConnected && turn.matches('[data-testid^="conversation-turn-"]'));
+        ordered = [...tracked].filter((turn) => turn.isConnected && turn.matches(turnSelector));
         ordered.sort((a, b) => {
           if (a === b) return 0;
           return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
@@ -151,7 +151,7 @@
         const turns = turnsInOrder();
         const starts = [];
         turns.forEach((turn, index) => {
-          if (roles.get(turn) === 'user') starts.push(index);
+          if (turn.hasAttribute('data-turn-key') || roles.get(turn) === 'user') starts.push(index);
         });
         const boundaryIndex = starts.length > total ? starts[starts.length - total] : -1;
         turns.forEach((turn, index) => {
@@ -172,7 +172,8 @@
           if (mutation.type === 'attributes') {
             const target = mutation.target instanceof Element ? mutation.target : null;
             if (!target) continue;
-            const wasTurn = mutation.attributeName === 'data-testid' && String(mutation.oldValue || '').startsWith('conversation-turn-');
+            const wasTurn = (mutation.attributeName === 'data-testid' && String(mutation.oldValue || '').startsWith('conversation-turn-')) ||
+              (mutation.attributeName === 'data-turn-key' && Boolean(mutation.oldValue));
             if (wasTurn && !target.matches(turnSelector)) {
               changed = untrack(target) || changed;
             } else {
@@ -204,7 +205,7 @@
         subtree: true,
         attributes: true,
         attributeOldValue: true,
-        attributeFilter: ['data-testid', 'data-turn', 'data-message-author-role', 'data-csg-recent-runtime']
+        attributeFilter: ['data-testid', 'data-turn-key', 'data-turn', 'data-message-author-role', 'data-conversation-role', 'data-csg-recent-runtime']
       });
       schedule();
     }

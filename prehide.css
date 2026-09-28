@@ -140,6 +140,17 @@ html.csg-prehide-recent-fast [data-csg-prehide-old-turn] {
   pointer-events: none !important;
 }
 
+/* The authenticated exchange virtualizer keeps a fixed inline height on the
+   parent cell. Suppress that parent estimate only while its exchange is in the
+   bootstrap old-history prehide set, otherwise the hidden exchange becomes a
+   large visible blank region. */
+html.csg-prehide-recent-fast :has(> [data-turn-key][data-csg-prehide-old-turn]) {
+  height: 0 !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+  overflow: hidden !important;
+}
+
 #csg-recent-loading {
   position: fixed;
   left: 50%;

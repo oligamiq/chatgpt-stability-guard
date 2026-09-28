@@ -17,12 +17,14 @@ concurrency:
 
 jobs:
   compatibility:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       regression: ${{ steps.outcomes.outputs.regression }}
       live: ${{ steps.outcomes.outputs.live }}
       live_reportable: ${{ steps.outcomes.outputs.live_reportable }}
+      live_contract_rc: ${{ steps.live.outputs.contract_rc }}
+      live_smoke_rc: ${{ steps.live.outputs.smoke_rc }}
 
     steps:
       - name: Check out repository
@@ -83,7 +85,7 @@ jobs:
           fi
 
       - name: Upload compatibility diagnostics
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && github.event_name != 'pull_request' }}
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
@@ -101,22 +103,32 @@ jobs:
           echo "live=${{ steps.live.outcome }}" >> "$GITHUB_OUTPUT"
           echo "live_reportable=${{ steps.live.outputs.reportable }}" >> "$GITHUB_OUTPUT"
 
-      - name: Enforce pull request regression result
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      - name: Enforce compatibility result
+        if: ${{ !cancelled() }}
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REGRESSION_OUTCOME: ${{ steps.regression.outcome }}
+          LIVE_OUTCOME: ${{ steps.live.outcome }}
         run: |
+          failed=0
           if [[ "$REGRESSION_OUTCOME" != "success" ]]; then
             echo "Extension regression suite outcome: $REGRESSION_OUTCOME"
+            failed=1
+          fi
+          if [[ "$EVENT_NAME" != "pull_request" && "$LIVE_OUTCOME" != "success" ]]; then
+            echo "Live ChatGPT compatibility outcome: $LIVE_OUTCOME"
+            failed=1
+          fi
+          if [[ "$failed" -ne 0 ]]; then
             exit 1
           fi
-          echo "Pull request regression suite passed."
+          echo "Compatibility guard passed."
 
   report:
     needs: compatibility
     if: ${{ always() && !cancelled() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
@@ -127,6 +139,8 @@ jobs:
         env:
           REGRESSION_OUTCOME: ${{ needs.compatibility.outputs.regression }}
           LIVE_OUTCOME: ${{ needs.compatibility.outputs.live }}
+          LIVE_CONTRACT_RC: ${{ needs.compatibility.outputs.live_contract_rc }}
+          LIVE_SMOKE_RC: ${{ needs.compatibility.outputs.live_smoke_rc }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CSG_REF: ${{ github.ref }}
           CSG_SHA: ${{ github.sha }}
@@ -158,6 +172,8 @@ jobs:
               '',
               `- Extension regression suite: **${process.env.REGRESSION_OUTCOME || 'unknown'}**`,
               `- Live ChatGPT core contract + smoke: **${process.env.LIVE_OUTCOME || 'unknown'}**`,
+              `- Live contract exit code: ${process.env.LIVE_CONTRACT_RC || 'n/a'}`,
+              `- Live smoke exit code: ${process.env.LIVE_SMOKE_RC || 'n/a'}`,
               `- Ref: ${process.env.CSG_REF}`,
               `- Commit: ${process.env.CSG_SHA}`,
               `- Workflow run: ${process.env.RUN_URL}`,
@@ -221,25 +237,3 @@ jobs:
                 state_reason: 'completed',
               });
             }
-
-
-      - name: Enforce reported compatibility result
-        if: ${{ !cancelled() }}
-        shell: bash
-        env:
-          REGRESSION_OUTCOME: ${{ needs.compatibility.outputs.regression }}
-          LIVE_OUTCOME: ${{ needs.compatibility.outputs.live }}
-        run: |
-          failed=0
-          if [[ "$REGRESSION_OUTCOME" == "failure" ]]; then
-            echo "Extension regression suite failed."
-            failed=1
-          fi
-          if [[ "$LIVE_OUTCOME" == "failure" ]]; then
-            echo "Live ChatGPT compatibility check failed."
-            failed=1
-          fi
-          if [[ "$failed" -ne 0 ]]; then
-            exit 1
-          fi
-          echo "No reportable compatibility failure."

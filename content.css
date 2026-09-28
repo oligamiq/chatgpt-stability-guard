@@ -63,6 +63,31 @@ html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
   pointer-events: none !important;
 }
 
+
+/* Current ChatGPT can render a completed tool invocation/result as its own card
+   (for example a tool-name header followed by “View lines …” or “View file …”)
+   outside the legacy group/tool-message shell. Keep React ownership intact but
+   remove the settled result card from conversation layout. */
+html.csg-hide-tool-summary .csg-tool-result-card {
+  /* Project/Work tool rows can use display:contents wrappers. Zero-sizing such
+     a wrapper does not suppress its rendered children; display:none does, while
+     keeping the React-owned node mounted in the DOM. */
+  display: none !important;
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* While a reply is still generating, keep summary-only shells out of flow but
    measurable. An App that reuses the same React-owned shell can then read a real
    parent width/auto height during its first layout effect; the next mutation
@@ -133,6 +158,24 @@ html.csg-hide-tool-summary .csg-tool-summary button:is(
   color: transparent !important;
   font-size: 0 !important;
   line-height: 0 !important;
+}
+
+/* Current ChatGPT can render rich Tool/App UI directly inside a tool-message
+   shell instead of an iframe. Once generation/bootstrap has settled, remove that
+   passive shell from flow while keeping the React-owned DOM mounted. */
+html.csg-hide-tool-embeds .csg-tool-embed-ui {
+  position: absolute !important;
+  inline-size: 0 !important;
+  block-size: 0 !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  max-inline-size: 0 !important;
+  max-block-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* Passive Tool/App previews stay mounted for ChatGPT/React but are removed from
@@ -276,6 +319,22 @@ html[data-csg-recent-mode="per-chat"] .csg-chat-collapsed {
 
 html[data-csg-recent-mode="per-chat"] .csg-chat-collapsed > :not(.csg-chat-toggle) {
   display: none !important;
+}
+
+/* Authenticated ChatGPT now wraps each exchange in a fixed-height virtualizer
+   cell whose direct child carries data-turn-key. Collapsing only that child
+   leaves the cell's inline height as a giant blank gap, so release the fixed
+   height while the exchange is folded. The React-owned cell stays mounted. */
+html[data-csg-recent-mode="per-chat"] :has(> [data-turn-key].csg-chat-collapsed) {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+html[data-csg-recent-mode="per-chat"] :has(> [data-turn-key].csg-hidden-old-turn) {
+  height: 0 !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+  overflow: hidden !important;
 }
 
 

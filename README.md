@@ -71,9 +71,13 @@ python3 scripts/test.py
 
 `.github/workflows/compatibility.yml` はpush / pull request時に全回帰テストを実行し、さらに毎日09:17 JST（00:17 UTC）と手動実行時には公開ChatGPT shareページを使ったlive互換性検査も行う。
 
-live検査は2段構成。`scripts/live_site_contract.py` が会話turn、role、scroll root、安定属性、祖先構造など拡張が依存するDOM構造を正規化して `scripts/live_site_baseline.json` と比較する。`scripts/live_site_smoke.mjs` は実サイトをHeadless Chromeで開き、現在のDOMへGuard本体とRecent-Nを直接注入して、初期化、Recent-Nのready/collapsed遷移、古いturnの抑制、履歴アコーディオン表示まで確認する。DOM全文や会話本文はartifactへ保存しない。
+live検査は2段構成。`scripts/live_site_contract.py` が会話turn、role、scroll root、安定属性、祖先構造など拡張が依存するDOM構造を正規化して `scripts/live_site_baseline.json` と比較する。`scripts/live_site_smoke.mjs` は実サイトをHeadless Chromeで開き、現在のDOMへGuard本体とRecent-Nを直接注入して、初期化、Recent-Nのready/collapsed遷移、古いturnの抑制、履歴アコーディオン表示まで確認する。smoke harness自体はlegacy `conversation-turn-*` と認証UI型 `data-turn-key` の両方を回帰fixtureで検査し、ページ読込後に既知の会話rootが消えた場合はインフラ障害ではなくreportableな互換性破壊として扱う。DOM全文や会話本文はartifactへ保存しない。
 
-公開shareページでは認証済みprivate chatにあるtool trace/App mountが描画されない場合があるため、live smokeが保証するのは公開ページで観測できるcore conversation / Recent-Nの互換性である。tool summary、App preview、Connect/Retry等のtool固有DOMは、実際に観測したproduction DOMをfixture化した `test_ui_isolation.py` 等の回帰テストで毎回検査する。監視URLとしてtool UIを保持する公開shareを用意できた場合は `CSG_LIVE_CHAT_URL` を差し替えてbaselineを更新できる。
+公開shareページでは認証済みprivate chatにあるtool trace/App mountが描画されない場合があるため、ネットワークlive smokeが保証するのは公開ページで観測できるcore conversation / Recent-Nの互換性までである。認証済み `data-turn-key` exchange、tool summary、`View lines…` 行、MCP App portal、Connect/Retry等は、実際に観測したproduction DOMを縮約した `test_authenticated_tool_boundary.py`、`test_tool_result_cards.py`、`test_current_mcp_app_portal.py`、`test_ui_isolation.py` 等の回帰テストでpush / pull requestごとに検査する。pull requestでは外部サイト依存のliveアクセスは行わず、これらのfixtureと全回帰テストを必須gateにする。監視URLとしてtool UIを保持する公開shareを用意できた場合は `CSG_LIVE_CHAT_URL` を差し替えてbaselineを更新できる。
+
+`.github/workflows/authenticated-canary.yml` はこれを補完する認証済み実サイトcanaryである。Xubuntu上の専用self-hosted runnerと専用Chromeプロファイルを使い、4時間ごとにXvfb上の通常Chromeで実private会話を開く。`data-turn-key` exchangeとMCP App portalが現在も存在すること、現行 `content.js` 適用後にsettled Tool/App行が全件非表示になること、iframeが接続されたままであることを実DOMで検査する。既知rootやMCP属性の消失・改名、またはGuardが実DOMを隠せなくなった場合はexit code 2のsite compatibility failureとして `[CI] Authenticated ChatGPT canary regression` Issueを起票する。認証切れ・Cloudflare challenge・runner/browser障害はexit code 3として区別する。
+
+認証済みcanaryは `main` push / schedule / 手動実行だけで動き、pull requestからは起動しない。GitHubへ送るartifactはDOM件数と成否のJSON/ログだけで、会話本文・Cookie・認証プロファイル・スクリーンショットはアップロードしない。スクリーンショットはXubuntuローカルの診断ディレクトリにのみ保存する。self-hosted canary jobのGitHub tokenは `contents:read` のみに制限し、Issue操作は別のGitHub-hosted jobが担当する。
 
 互換性契約の差分または実サイト上の機能smoke失敗を検出すると `[CI] ChatGPT site compatibility regression` Issueを自動作成する。同じ障害が続く間は既存Issueへ診断結果を追記し、全検査が再び成功した時点で自動closeする。`automated` / `site-compatibility` labelが無ければCIが作成する。Cloudflare challenge、ネットワーク断、Chrome起動失敗など監視基盤側の異常はworkflow自体を失敗させるが、サイト互換性Issueとしては起票しない。
 
