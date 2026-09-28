@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.37 — 2026-09-28
+
+- Fixes Project/Work MCP App rows that could remain visible when root CSS gates were clobbered or stale: settled `data-mcp-app-portal-target` surfaces and their headers are now hidden directly with an owned `display: none !important` presentation while the iframe stays connected.
+- Restores any prior inline `display` value when the App must fail open again, preserving Connect/Auth/Retry and bootstrap behavior.
+- Added a saved-Project-shaped regression using the actual 38px Japanese `desktop-commander-home` structure (`アプリをタブで開く`) and verifies the portal/header become `display:none` after generation settles.
+
 ## 1.0.36 — 2026-09-28
 
 - Fixes Project/Work shell updates that replace `<html class>` and silently remove Stability Guard's `csg-*` setting gates while leaving the guard runtime/status alive.

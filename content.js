@@ -1626,6 +1626,31 @@
       else element.removeAttribute('data-csg-preview-state');
     }
 
+    const INLINE_PREVIEW_HIDE_ATTR = 'data-csg-inline-preview-hidden';
+    const INLINE_PREVIEW_DISPLAY_ATTR = 'data-csg-inline-preview-display';
+    const INLINE_PREVIEW_PRIORITY_ATTR = 'data-csg-inline-preview-display-priority';
+
+    function applyInlinePreviewHide(element) {
+      if (!(element instanceof Element) || element.hasAttribute(INLINE_PREVIEW_HIDE_ATTR)) return;
+      const previousDisplay = element.style.getPropertyValue('display');
+      const previousPriority = element.style.getPropertyPriority('display');
+      element.setAttribute(INLINE_PREVIEW_HIDE_ATTR, 'true');
+      if (previousDisplay) element.setAttribute(INLINE_PREVIEW_DISPLAY_ATTR, previousDisplay);
+      if (previousPriority) element.setAttribute(INLINE_PREVIEW_PRIORITY_ATTR, previousPriority);
+      element.style.setProperty('display', 'none', 'important');
+    }
+
+    function releaseInlinePreviewHide(element) {
+      if (!(element instanceof Element) || !element.hasAttribute(INLINE_PREVIEW_HIDE_ATTR)) return;
+      const previousDisplay = element.getAttribute(INLINE_PREVIEW_DISPLAY_ATTR) || '';
+      const previousPriority = element.getAttribute(INLINE_PREVIEW_PRIORITY_ATTR) || '';
+      if (previousDisplay) element.style.setProperty('display', previousDisplay, previousPriority);
+      else element.style.removeProperty('display');
+      element.removeAttribute(INLINE_PREVIEW_HIDE_ATTR);
+      element.removeAttribute(INLINE_PREVIEW_DISPLAY_ATTR);
+      element.removeAttribute(INLINE_PREVIEW_PRIORITY_ATTR);
+    }
+
     function isBrokenPreviewMount(element) {
       return element instanceof Element &&
         (element.classList.contains('csg-broken-preview') ||
@@ -1644,6 +1669,14 @@
       parts.header?.classList.toggle('csg-preview-live-layout', preserveLiveLayout);
       parts.mount.classList.add('csg-hidden-preview');
       parts.header?.classList.add('csg-hidden-preview-header');
+      // Current Project/Work MCP rows can survive host <html> class replacement
+      // because their iframe/header are real layout boxes. For ready MCP Apps,
+      // own the final presentation directly instead of relying only on a root
+      // CSS gate. The iframe remains connected; release restores prior display.
+      if (parts.kind === 'mcp-app' && !preserveLiveLayout) {
+        applyInlinePreviewHide(parts.mount);
+        applyInlinePreviewHide(parts.header);
+      }
       setPreviewState(parts.mount, stateName);
       setPreviewState(parts.header, stateName);
       parts.divider?.setAttribute('data-csg-preview-divider', stateName);
@@ -1666,6 +1699,7 @@
       const dividers = new Set([entry?.divider, parts?.divider].filter((node) => node instanceof Element));
       for (const mount of mounts) {
         if (preserved.has(mount)) continue;
+        releaseInlinePreviewHide(mount);
         mount.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
         setPreviewState(mount);
         mount.style.removeProperty('--csg-collapse-block');
@@ -1673,6 +1707,7 @@
       }
       for (const header of headers) {
         if (preserved.has(header)) continue;
+        releaseInlinePreviewHide(header);
         header.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         setPreviewState(header);
         header.style.removeProperty('--csg-collapse-block');
@@ -1790,6 +1825,8 @@
           previewResizeObserver?.unobserve(entry.mount);
           if (state.previewMounts.get(entry.mount) === iframe) state.previewMounts.delete(entry.mount);
         }
+        releaseInlinePreviewHide(entry.mount);
+        releaseInlinePreviewHide(entry.header);
         entry.mount?.classList.remove('csg-preview-settling', 'csg-broken-preview', 'csg-hidden-preview', 'csg-preview-live-layout');
         entry.header?.classList.remove('csg-preview-settling', 'csg-broken-preview-header', 'csg-hidden-preview-header', 'csg-preview-live-layout');
         entry.divider?.removeAttribute('data-csg-preview-divider');
