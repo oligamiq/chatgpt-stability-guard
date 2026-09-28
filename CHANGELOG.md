@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.36 — 2026-09-28
+
+- Fixes Project/Work shell updates that replace `<html class>` and silently remove Stability Guard's `csg-*` setting gates while leaving the guard runtime/status alive.
+- Adds a dedicated root-class observer that re-applies only the enabled Stability Guard classes without disturbing host classes.
+- Added a regression matching the saved Project failure: `#csg-status` survives, the host overwrites `html.className`, and Tool/App hiding must self-heal automatically.
+
 ## 1.0.35 — 2026-09-28
 
 - Fixes Project/Work Tool result rows whose outer React wrapper uses `display: contents`: zero-sizing the wrapper did not hide rendered children such as `xubuntu-desktop-commander` and `View lines …` / `View file …`.

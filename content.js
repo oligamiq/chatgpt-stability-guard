@@ -3120,21 +3120,38 @@
       }, 500);
     }
 
+    const ROOT_SETTING_CLASS_MAP = [
+      ['csg-hide-thinking', 'hideThinking'],
+      ['csg-hide-tools', 'hideTools'],
+      ['csg-hide-tool-summary', 'hideToolSummary'],
+      ['csg-hide-tool-embeds', 'hideToolEmbeds'],
+      ['csg-hide-old-app-errors', 'hideOldAppLoadErrors'],
+      ['csg-dim-traces', 'dimTraces'],
+      ['csg-compact-traces', 'compactTraces'],
+      ['csg-reduce-motion', 'reduceMotion'],
+      ['csg-lazy-heavy', 'lazyHeavyBlocks'],
+      ['csg-freeze-old', 'freezeOldTurns']
+    ];
+
     function toggleClass(name, on) {
       root.classList.toggle(name, Boolean(state.settings.enabled && on));
     }
 
+    function syncRootSettingClasses() {
+      for (const [name, key] of ROOT_SETTING_CLASS_MAP) {
+        toggleClass(name, state.settings[key]);
+      }
+    }
+
+    const rootClassObserver = new MutationObserver(() => {
+      // Project/Work can replace the <html> className wholesale during shell
+      // updates. Re-assert only Stability Guard's setting classes; host classes
+      // remain untouched and no work is done once everything already matches.
+      syncRootSettingClasses();
+    });
+
     function applySettings() {
-      toggleClass('csg-hide-thinking', state.settings.hideThinking);
-      toggleClass('csg-hide-tools', state.settings.hideTools);
-      toggleClass('csg-hide-tool-summary', state.settings.hideToolSummary);
-      toggleClass('csg-hide-tool-embeds', state.settings.hideToolEmbeds);
-      toggleClass('csg-hide-old-app-errors', state.settings.hideOldAppLoadErrors);
-      toggleClass('csg-dim-traces', state.settings.dimTraces);
-      toggleClass('csg-compact-traces', state.settings.compactTraces);
-      toggleClass('csg-reduce-motion', state.settings.reduceMotion);
-      toggleClass('csg-lazy-heavy', state.settings.lazyHeavyBlocks);
-      toggleClass('csg-freeze-old', state.settings.freezeOldTurns);
+      syncRootSettingClasses();
       bindVirtualSpacerObserver();
       if (!state.settings.enabled || !state.settings.hideToolSummary) {
         clearTimeout(state.toolCleanupTimer);
@@ -3655,6 +3672,7 @@
 
     chrome.storage.local.get({ settings: DEFAULTS }, ({ settings }) => {
       state.settings = normalizeSettings(settings);
+      rootClassObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
       seedMountedTurns();
       if (state.settings.enabled && state.settings.hideOldAppLoadErrors) {
         // Seed route identity synchronously at document_idle. Without this,

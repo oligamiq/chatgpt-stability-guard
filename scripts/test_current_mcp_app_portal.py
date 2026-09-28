@@ -50,12 +50,19 @@ function visible(id){{const x=snap(id);return x.w>0&&x.h>0&&Number(x.opacity)>0}
 setTimeout(()=>{{window.active={{readyPortal:visible('ready-portal'),readyHeader:visible('ready-header'),readyHidden:snap('ready-portal').hidden}}}},500);
 setTimeout(()=>document.getElementById('stop').setAttribute('aria-label','Send message'),650);
 setTimeout(()=>{{
+  // Project/Work can replace the entire <html> className after the guard has
+  // already classified and hidden the App. Reproduce the saved-page failure
+  // where #csg-status survived but every csg-* root gate disappeared.
+  document.documentElement.className='chatgpt-theme host-shell-overwrite';
+}},1250);
+setTimeout(()=>{{
   window.done={{
     readyPortal:snap('ready-portal'),readyHeader:snap('ready-header'),readyCard:snap('ready'),
     authVisible:visible('auth-portal')&&visible('auth-header'),
     preparingVisible:visible('preparing-header')&&!snap('preparing-portal').hidden,
     frameConnected:document.getElementById('ready-iframe').isConnected,
-    answerVisible:visible('answer')
+    answerVisible:visible('answer'),
+    rootClass:[...document.documentElement.classList]
   }};
   const out=document.createElement('pre');out.id='result';
   out.textContent=JSON.stringify({{active:window.active,done:window.done}});document.body.appendChild(out)
@@ -85,7 +92,11 @@ def main():
     assert done['authVisible'] is True, payload
     assert done['preparingVisible'] is True, payload
     assert done['frameConnected'] is True and done['answerVisible'] is True, payload
+    assert 'host-shell-overwrite' in done['rootClass'], payload
+    assert 'csg-hide-tool-embeds' in done['rootClass'], payload
+    assert 'csg-hide-tool-summary' in done['rootClass'], payload
     print('PASS current-mcp-app-portal: live/bootstrapping/auth fail open; settled portal and header collapse to 0x0')
+    print('PASS root-class-guard: host html.className overwrite self-heals CSG setting gates')
 
 
 if __name__ == '__main__':
