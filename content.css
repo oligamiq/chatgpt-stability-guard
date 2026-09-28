@@ -69,6 +69,10 @@ html.csg-hide-tool-summary [class~="group/tool-message"].csg-tool-ui {
    outside the legacy group/tool-message shell. Keep React ownership intact but
    remove the settled result card from conversation layout. */
 html.csg-hide-tool-summary .csg-tool-result-card {
+  /* Project/Work tool rows can use display:contents wrappers. Zero-sizing such
+     a wrapper does not suppress its rendered children; display:none does, while
+     keeping the React-owned node mounted in the DOM. */
+  display: none !important;
   position: absolute !important;
   inline-size: 0 !important;
   block-size: 0 !important;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.35 — 2026-09-28
+
+- Fixes Project/Work Tool result rows whose outer React wrapper uses `display: contents`: zero-sizing the wrapper did not hide rendered children such as `xubuntu-desktop-commander` and `View lines …` / `View file …`.
+- Settled Tool result cards now use `display: none` while remaining mounted in the DOM; live generation and Connect/Auth/Retry fail-open behavior is unchanged.
+- Added a `display: contents` regression that verifies both the provider header and result action disappear, not just the wrapper box.
+
 ## 1.0.34 — 2026-09-27
 
 - Fixes current authenticated MCP App surfaces rendered through `data-mcp-app-portal-target` / `data-mcp-app-inline-surface` / `data-mcp-app-frame`; the surrounding `display: contents` wrapper could be 0x0 while its App children still rendered at full size.

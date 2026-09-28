@@ -23,11 +23,12 @@ def exchange(key, body):
 {body}<div class="markdown">answer {key}</div></div></div></div>'''
 
 
-def tool_card(card_id, action_id, action_text, extra='', plain=False):
+def tool_card(card_id, action_id, action_text, extra='', plain=False, display_contents=False):
     action = (f'<div id="{action_id}" class="tool-action"><span>View lines 3200–</span><span>3429 · content.js</span></div>'
               if plain else f'<button id="{action_id}" type="button">{action_text}</button>')
-    return f'''<div id="{card_id}" class="tool-result-fixture">
-<div class="tool-header"><span class="tool-icon"></span><span>xubuntu-desktop-commander</span><button aria-label="Expand tool card">⌄</button></div>
+    style = ' style="display:contents"' if display_contents else ''
+    return f'''<div id="{card_id}" class="tool-result-fixture"{style}>
+<div id="{card_id}-header" class="tool-header"><span class="tool-icon"></span><span>xubuntu-desktop-commander</span><button aria-label="Expand tool card">⌄</button></div>
 {action}{extra}</div>'''
 
 
@@ -52,24 +53,24 @@ window.chrome={{
 <main id="main">
 <div id="turnless-card" class="tool-result-fixture"><div class="tool-header"><span>xubuntu-desktop-commander</span></div><div id="turnless-action"><span>View file · </span><span>manifest.json</span></div></div>
 <div id="thread">
-{exchange('ex-1', tool_card('old-card', 'old-action', 'View lines 1–1000 · content.js', plain=True) + '<div id="flat-header" class="flat-tool-header">xubuntu-desktop-commander</div><div id="flat-action" class="flat-tool-action"><span>View lines 80–108 · README.md</span></div>')}
+{exchange('ex-1', tool_card('old-card', 'old-action', 'View lines 1–1000 · content.js', plain=True, display_contents=True) + '<div id="flat-header" class="flat-tool-header">xubuntu-desktop-commander</div><div id="flat-action" class="flat-tool-action"><span>View lines 80–108 · README.md</span></div>')}
 {exchange('ex-2', '<div>middle answer</div>')}
 {exchange('ex-3', tool_card('live-card', 'live-action', 'View file · manifest.json') + tool_card('auth-card', 'auth-action', 'View file · private.json', '<button id="connect">Connect account</button>') + '<div class="markdown"><button id="markdown-view">View file · README.md</button></div>')}
 </div>
 </main>
 <script>{CONTENT_JS}</script>
 <script>
-const snap=(id)=>{{const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);return {{cls:[...e.classList],w:r.width,h:r.height,pos:s.position,opacity:s.opacity,pointer:s.pointerEvents}}}};
-setTimeout(()=>{{window.__beforeStop={{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}};}},350);
+const snap=(id)=>{{const e=document.getElementById(id),r=e.getBoundingClientRect(),s=getComputedStyle(e);return {{cls:[...e.classList],w:r.width,h:r.height,pos:s.position,display:s.display,opacity:s.opacity,pointer:s.pointerEvents}}}};
+setTimeout(()=>{{window.__beforeStop={{old:snap('old-card'),oldHeader:snap('old-card-header'),oldAction:snap('old-action'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}};}},350);
 setTimeout(()=>document.getElementById('stop')?.remove(),600);
 setTimeout(()=>{{
- const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{before:window.__beforeStop,after:{{old:snap('old-card'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}}}});document.body.appendChild(out);
+ const out=document.createElement('pre');out.id='result';out.textContent=JSON.stringify({{before:window.__beforeStop,after:{{old:snap('old-card'),oldHeader:snap('old-card-header'),oldAction:snap('old-action'),live:snap('live-card'),auth:snap('auth-card'),markdown:snap('markdown-view'),turnless:snap('turnless-card'),flatHeader:snap('flat-header'),flatAction:snap('flat-action')}}}});document.body.appendChild(out);
 }},1700);
 </script></body></html>'''
 
 
 def hidden(s):
-    return 'csg-tool-result-card' in s['cls'] and s['pos'] == 'absolute' and s['w'] == 0 and s['h'] == 0 and s['opacity'] == '0'
+    return 'csg-tool-result-card' in s['cls'] and s['display'] == 'none' and s['w'] == 0 and s['h'] == 0
 
 
 def main():
@@ -85,6 +86,8 @@ def main():
         raise AssertionError(f'no result\n{proc.stderr[-1500:]}\n{proc.stdout[-4000:]}')
     result = json.loads(html.unescape(match.group(1)))
     assert hidden(result['before']['old']), result
+    assert result['before']['oldHeader']['w'] == 0 and result['before']['oldHeader']['h'] == 0, result
+    assert result['before']['oldAction']['w'] == 0 and result['before']['oldAction']['h'] == 0, result
     assert not hidden(result['before']['live']), result
     assert not hidden(result['before']['auth']), result
     assert not hidden(result['before']['markdown']), result
