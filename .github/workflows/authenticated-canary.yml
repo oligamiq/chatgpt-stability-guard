@@ -1,0 +1,157 @@
+name: Authenticated ChatGPT Canary
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authenticated-chatgpt-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: [self-hosted, linux, x64, chatgpt-auth-canary]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      rc: ${{ steps.canary.outputs.rc }}
+      outcome: ${{ steps.canary.outcome }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          google-chrome --version
+
+      - name: Run authenticated live canary
+        id: canary
+        continue-on-error: true
+        shell: bash
+        env:
+          CSG_AUTH_CANARY_URL: ${{ vars.CSG_AUTH_CANARY_URL }}
+          CSG_AUTH_CANARY_PROFILE: /home/oligami/.local/share/csg-auth-canary-profile
+          CSG_AUTH_CANARY_XVFB: /home/oligami/.local/opt/xvfb/usr/bin/Xvfb
+        run: |
+          mkdir -p artifacts
+          set +e
+          node scripts/authenticated_site_canary.mjs 2>&1 | tee artifacts/authenticated-site-canary.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Upload canary diagnostics
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: authenticated-canary-${{ github.run_id }}
+          path: |
+            artifacts/authenticated-site-canary.json
+            artifacts/authenticated-site-canary.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce canary result
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          CANARY_OUTCOME: ${{ steps.canary.outcome }}
+        run: |
+          if [[ "$CANARY_OUTCOME" != "success" ]]; then
+            echo "Authenticated ChatGPT canary outcome: $CANARY_OUTCOME"
+            exit 1
+          fi
+          echo "Authenticated ChatGPT canary passed."
+
+  report:
+    needs: canary
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update canary issue
+        if: ${{ needs.canary.result != 'success' || needs.canary.outputs.outcome != 'success' }}
+        uses: actions/github-script@v9
+        env:
+          CANARY_RC: ${{ needs.canary.outputs.rc }}
+          CANARY_RESULT: ${{ needs.canary.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = '[CI] Authenticated ChatGPT canary regression';
+            async function ensureLabel(name, color, description) {
+              try { await github.rest.issues.getLabel({ owner, repo, name }); }
+              catch (error) {
+                if (error.status !== 404) throw error;
+                try { await github.rest.issues.createLabel({ owner, repo, name, color, description }); }
+                catch (createError) { if (createError.status !== 422) throw createError; }
+              }
+            }
+            await ensureLabel('automated', '6f42c1', 'Created and maintained automatically by CI');
+            await ensureLabel('authenticated-canary', 'b60205', 'Authenticated ChatGPT UI canary failed');
+            const labels = ['automated', 'authenticated-canary'];
+            if (process.env.CANARY_RC === '2') {
+              await ensureLabel('site-compatibility', 'd73a4a', 'ChatGPT Web compatibility or DOM contract changed');
+              labels.push('site-compatibility');
+            }
+            const kind = process.env.CANARY_RC === '2'
+              ? 'ChatGPT authenticated DOM/behavior changed and Stability Guard no longer satisfies the live canary.'
+              : 'The authenticated canary could not complete because authentication, the runner, or the browser environment failed.';
+            const body = [
+              kind,
+              '',
+              `- Canary job result: ${process.env.CANARY_RESULT || 'unknown'}`,
+              `- Canary exit code: ${process.env.CANARY_RC || 'unknown'}`,
+              `- Workflow run: ${process.env.RUN_URL}`,
+              `- Diagnostics artifact: authenticated-canary-${process.env.RUN_ID}`,
+              '',
+              'No conversation text, cookies, or screenshots are uploaded. Failure screenshots stay only on the Xubuntu host.',
+            ].join('\n');
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'automated,authenticated-canary', per_page: 100,
+            });
+            const existing = open.find(issue => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: existing.number, body });
+              await github.rest.issues.addLabels({ owner, repo, issue_number: existing.number, labels });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body, labels });
+            }
+
+      - name: Close recovered canary issue
+        if: ${{ needs.canary.result == 'success' && needs.canary.outputs.outcome == 'success' }}
+        uses: actions/github-script@v9
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = '[CI] Authenticated ChatGPT canary regression';
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'automated,authenticated-canary', per_page: 100,
+            });
+            const existing = open.find(issue => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: `Authenticated ChatGPT canary recovered successfully.\n\nWorkflow run: ${process.env.RUN_URL}`,
+              });
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, state: 'closed', state_reason: 'completed' });
+            }
